@@ -1,0 +1,86 @@
+# HumaneProxy — project-level configuration.
+# Values here override the package defaults.
+# See: https://github.com/your-org/humane-proxy#configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true          # auto-reload on code changes (dev mode)
+
+safety:
+  risk_threshold: 0.7
+  spike_boost: 0.25
+
+heuristics:
+  self_harm_keywords:
+    - "want to die"
+    - "kill myself"
+    - "end my life"
+    - "suicide"
+    - "suicidal"
+    - "want to kill myself"
+    - "can't go on"
+    - "no reason to live"
+    - "overdose on"
+    - "slit my wrists"
+    - "hang myself"
+    - "cutting myself"
+    - "hurt myself"
+    - "self harm"
+    - "self-harm"
+    # Add your own keywords below:
+
+  criminal_keywords:
+    - "how to make a bomb"
+    - "how to build a bomb"
+    - "how to poison someone"
+    - "how to make poison"
+    - "how to kill someone"
+    - "how to get away with murder"
+    - "how to make meth"
+    - "how to synthesize fentanyl"
+    - "how to cook meth"
+    - "child pornography"
+    - "explosive device"
+    - "how to make ricin"
+    # Add your own keywords below:
+
+  self_harm_keyword_score: 0.7
+  criminal_keyword_score: 0.6
+  intent_pattern_score: 0.7
+
+  context_reducers:
+    - "laughing"
+    - "of laughter"
+    - "of embarrassment"
+    - "of boredom"
+    - "in the game"
+    - "in minecraft"
+    - "for my character"
+    - "in fiction"
+    - "the villain"
+    - "the character"
+    - "in a novel"
+    - "in a movie"
+    - "in a book"
+    - "in a story"
+    - "my character"
+    - "warning signs"
+    - "prevent"
+    - "prevention"
+    - "how to help"
+    - "help someone"
+    - "help a friend"
+    - "awareness"
+
+trajectory:
+  window_size: 5
+  spike_delta: 0.35
+
+escalation:
+  rate_limit_max: 3
+  rate_limit_window_hours: 1
+  webhooks:
+    slack_url: ""
+    discord_url: ""
+    pagerduty_routing_key: ""

@@ -1,0 +1,109 @@
+# HumaneProxy — package default configuration.
+# Users can override any value by placing a `humane_proxy.yaml` in their
+# project directory, or by setting HUMANE_PROXY_* environment variables.
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+
+safety:
+  # Risk score threshold (0.0 - 1.0). Scores at or above this trigger escalation.
+  risk_threshold: 0.7
+
+  # Score boost applied when a trajectory spike is detected.
+  spike_boost: 0.25
+
+  # Maximum number of messages to retain per session for trajectory analysis.
+  session_history_limit: 20
+
+heuristics:
+  # Self-harm keywords — phrases that indicate self-harm ideation.
+  self_harm_keywords:
+    - "want to die"
+    - "kill myself"
+    - "end my life"
+    - "suicide"
+    - "suicidal"
+    - "want to kill myself"
+    - "can't go on"
+    - "no reason to live"
+    - "overdose on"
+    - "slit my wrists"
+    - "hang myself"
+    - "cutting myself"
+    - "hurt myself"
+    - "self harm"
+    - "self-harm"
+
+  # Criminal intent keywords — phrases indicating harmful criminal plans.
+  criminal_keywords:
+    - "how to make a bomb"
+    - "how to build a bomb"
+    - "how to poison someone"
+    - "how to make poison"
+    - "how to kill someone"
+    - "how to get away with murder"
+    - "how to make meth"
+    - "how to synthesize fentanyl"
+    - "how to cook meth"
+    - "child pornography"
+    - "explosive device"
+    - "how to make ricin"
+
+  # Score assigned per self-harm keyword match.
+  self_harm_keyword_score: 0.7
+
+  # Score assigned per criminal keyword match.
+  criminal_keyword_score: 0.6
+
+  # Score assigned when an intent pattern is detected.
+  intent_pattern_score: 0.7
+
+  # Context-reducing phrases that lower false positives.
+  # When these appear alongside a single trigger, the score is reduced.
+  context_reducers:
+    - "laughing"
+    - "of laughter"
+    - "of embarrassment"
+    - "of boredom"
+    - "in the game"
+    - "in minecraft"
+    - "for my character"
+    - "in fiction"
+    - "the villain"
+    - "the character"
+    - "in a novel"
+    - "in a movie"
+    - "in a book"
+    - "in a story"
+    - "my character"
+    - "warning signs"
+    - "prevent"
+    - "prevention"
+    - "how to help"
+    - "help someone"
+    - "help a friend"
+    - "awareness"
+    - "for a novel"
+    - "for a movie"
+    - "for a book"
+    - "for a story"
+
+trajectory:
+  # Number of recent messages to evaluate for spike detection.
+  window_size: 5
+
+  # Delta threshold: if current_score - mean(last N) > spike_delta, flag it.
+  spike_delta: 0.35
+
+escalation:
+  # Per-session rate limiting for escalation logging.
+  rate_limit_max: 3
+  rate_limit_window_hours: 1
+
+  # Webhook URLs — leave empty to disable.
+  webhooks:
+    slack_url: ""
+    discord_url: ""
+    pagerduty_routing_key: ""
