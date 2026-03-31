@@ -7,7 +7,7 @@ HumaneProxy sits between your users and any LLM. When someone expresses self-har
 [![PyPI](https://img.shields.io/pypi/v/humane-proxy.svg)](https://pypi.org/project/humane-proxy/)
 [![Python](https://img.shields.io/pypi/pyversions/humane-proxy.svg)](https://pypi.org/project/humane-proxy/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Tests](https://github.com/Vishisht16/Humane-Proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/Vishisht16/Humane-Proxy/actions/workflows/ci.yml)
+[![Tests](https://github.com/Vishisht16/Humane-Proxy/actions/workflows/tests.yaml/badge.svg)](https://github.com/Vishisht16/Humane-Proxy/actions/workflows/tests.yaml)
 
 ---
 
@@ -78,7 +78,7 @@ HumaneProxy classifies every message through up to **3 stages**, each progressiv
 └──────────────────────────────────────────────────────────┘
              ↓ (still ambiguous)
 ┌──────────────────────────────────────────────────────────┐
-│  Stage 3 — Reasoning LLM                     ~1–3s      │
+│  Stage 3 — Reasoning LLM                     ~1–3s       │
 │  LlamaGuard (Groq) or OpenAI Moderation API              │
 │  Optional: set OPENAI_API_KEY or GROQ_API_KEY            │
 └──────────────────────────────────────────────────────────┘
@@ -359,7 +359,7 @@ privacy:
 
 Apache 2.0. See [LICENSE](LICENSE).
 
-Copyright 2026 Vishisht Mishra (@Vishisht16). Any attribution is appreciated.
+Copyright 2026 Vishisht Mishra ([@Vishisht16](https://github.com/Vishisht16)). Any attribution is appreciated.
 
 See [NOTICE](NOTICE) for full attribution information.
 

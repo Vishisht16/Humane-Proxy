@@ -1,0 +1,62 @@
+# Labels for HumaneProxy repository
+# Apply with: https://github.com/marketplace/actions/github-labeler
+
+- name: bug
+  color: "d73a4a"
+  description: "Something isn't working"
+
+- name: enhancement
+  color: "a2eeef"
+  description: "New feature or request"
+
+- name: documentation
+  color: "0075ca"
+  description: "Improvements or additions to documentation"
+
+- name: good first issue
+  color: "7057ff"
+  description: "Good for newcomers"
+
+- name: help wanted
+  color: "008672"
+  description: "Extra attention is needed"
+
+- name: self-harm-detection
+  color: "fbca04"
+  description: "Related to self-harm classification or care response"
+
+- name: criminal-intent
+  color: "e4e669"
+  description: "Related to criminal intent classification"
+
+- name: pipeline
+  color: "1d76db"
+  description: "Classifier pipeline (stages 1-3)"
+
+- name: mcp
+  color: "5319e7"
+  description: "MCP server integration"
+
+- name: admin-api
+  color: "0e8a16"
+  description: "REST admin API"
+
+- name: webhooks
+  color: "c5def5"
+  description: "Slack, Discord, Teams, PagerDuty, or email alerts"
+
+- name: privacy
+  color: "bfd4f2"
+  description: "Privacy, data handling, or right to erasure"
+
+- name: breaking-change
+  color: "b60205"
+  description: "Introduces a breaking change"
+
+- name: duplicate
+  color: "cfd3d7"
+  description: "This issue or pull request already exists"
+
+- name: wontfix
+  color: "ffffff"
+  description: "This will not be worked on"
