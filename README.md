@@ -1,6 +1,6 @@
 # 🛡️ HumaneProxy
 
-<!-- mcp-name: humane-proxy -->
+<!-- mcp-name: io.github.Vishisht16/humane-proxy -->
 
 **Lightweight, plug-and-play AI safety middleware that protects humans.**
 

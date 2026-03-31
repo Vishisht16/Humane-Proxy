@@ -46,3 +46,8 @@ coverage.xml
 
 # Gemini
 .gemini/
+
+# MCP publisher
+mcp-publisher.exe
+mcp-publisher
+.mcpregistry_*
