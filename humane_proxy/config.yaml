@@ -107,3 +107,49 @@ escalation:
     slack_url: ""
     discord_url: ""
     pagerduty_routing_key: ""
+
+# ---------------------------------------------------------------------------
+# 3-Stage Cascade Pipeline (Phase 2)
+# ---------------------------------------------------------------------------
+
+pipeline:
+  # Which stages to enable. [1] = heuristics only, [1,2] = +embeddings,
+  # [1,2,3] = full pipeline with reasoning LLM.
+  enabled_stages: [1]
+
+  # Early-exit ceilings: if the combined score is below this after the
+  # given stage AND category is "safe", skip remaining stages.
+  stage1_ceiling: 0.3
+  stage2_ceiling: 0.4
+
+stage2:
+  # Sentence-transformer model name (local).
+  # Requires: pip install humane-proxy[ml]
+  model: "all-MiniLM-L6-v2"
+
+  # Cosine similarity threshold: scores below this are "safe".
+  safe_threshold: 0.35
+
+stage3:
+  # Provider: "auto" | "openai_moderation" | "llamaguard" | "openai_chat" | "none"
+  # "auto" checks OPENAI_API_KEY → openai_moderation, then GROQ_API_KEY → llamaguard.
+  provider: "auto"
+
+  # HTTP timeout for Stage-3 API calls (seconds).
+  timeout: 10
+
+  openai_moderation:
+    api_url: "https://api.openai.com/v1/moderations"
+
+  llamaguard:
+    api_url: "https://api.groq.com/openai/v1/chat/completions"
+    model: "meta-llama/llama-guard-3-8b"
+
+  openai_chat:
+    api_url: "https://api.openai.com/v1/chat/completions"
+    model: "gpt-4o-mini"
+
+privacy:
+  # If false (default), only a SHA-256 hash of the message is stored
+  # in the escalation DB — never the raw text.
+  store_message_text: false

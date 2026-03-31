@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "humane-proxy"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lightweight, plug-and-play AI safety middleware that protects humans."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -28,6 +28,7 @@ classifiers = [
 dependencies = [
     "fastapi>=0.100.0",
     "httpx>=0.24.0",
+    "numpy>=1.24.0",
     "pyyaml>=6.0",
     "uvicorn>=0.22.0",
     "click>=8.0",
@@ -42,14 +43,17 @@ dev = [
     "pytest-asyncio>=0.21",
     "httpx",
 ]
+ml = [
+    "sentence-transformers>=2.2.0",
+]
 webhooks = [
     "httpx>=0.24.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/humane-proxy"
-Repository = "https://github.com/your-org/humane-proxy"
-Issues = "https://github.com/your-org/humane-proxy/issues"
+Homepage = "https://github.com/Vishisht16/Humane-Proxy"
+Repository = "https://github.com/Vishisht16/Humane-Proxy"
+Issues = "https://github.com/Vishisht16/Humane-Proxy/issues"
 
 # Ensure config.yaml is included in the built package.
 [tool.setuptools.package-data]

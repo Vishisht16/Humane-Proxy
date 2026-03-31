@@ -42,8 +42,16 @@ def _get_conn() -> sqlite3.Connection:
 
 
 # ---------------------------------------------------------------------------
-# Schema bootstrap
+# Schema bootstrap + migration
 # ---------------------------------------------------------------------------
+
+def _migrate_add_column(conn: sqlite3.Connection, name: str, definition: str) -> None:
+    """Safely add a column if it doesn't exist (no-op on duplicate)."""
+    try:
+        conn.execute(f"ALTER TABLE escalations ADD COLUMN {name} {definition}")
+    except sqlite3.OperationalError:
+        pass  # Column already exists.
+
 
 def init_db() -> None:
     """Create the ``escalations`` table if it does not already exist.
@@ -58,12 +66,15 @@ def init_db() -> None:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS escalations (
-                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT    NOT NULL,
-                    category   TEXT    NOT NULL DEFAULT 'unknown',
-                    risk_score REAL    NOT NULL,
-                    triggers   TEXT    NOT NULL,
-                    timestamp  REAL    NOT NULL
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id     TEXT    NOT NULL,
+                    category       TEXT    NOT NULL DEFAULT 'unknown',
+                    risk_score     REAL    NOT NULL,
+                    triggers       TEXT    NOT NULL,
+                    timestamp      REAL    NOT NULL,
+                    message_hash   TEXT,
+                    stage_reached  INTEGER DEFAULT 1,
+                    reasoning      TEXT
                 )
                 """
             )
@@ -74,6 +85,11 @@ def init_db() -> None:
                 ON escalations (session_id, timestamp)
                 """
             )
+
+            # Migration: add new columns if upgrading from Phase 1.
+            _migrate_add_column(conn, "message_hash", "TEXT")
+            _migrate_add_column(conn, "stage_reached", "INTEGER DEFAULT 1")
+            _migrate_add_column(conn, "reasoning", "TEXT")
     finally:
         conn.close()
 
@@ -118,6 +134,9 @@ def log_escalation(
     risk_score: float,
     triggers: list[str],
     category: str = "unknown",
+    message_hash: str | None = None,
+    stage_reached: int = 1,
+    reasoning: str | None = None,
 ) -> None:
     """Persist an escalation event to SQLite.
 
@@ -131,8 +150,10 @@ def log_escalation(
         with conn:
             conn.execute(
                 """
-                INSERT INTO escalations (session_id, category, risk_score, triggers, timestamp)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO escalations
+                    (session_id, category, risk_score, triggers, timestamp,
+                     message_hash, stage_reached, reasoning)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -140,6 +161,9 @@ def log_escalation(
                     risk_score,
                     json.dumps(triggers),
                     datetime.now(timezone.utc).timestamp(),
+                    message_hash,
+                    stage_reached,
+                    reasoning,
                 ),
             )
     finally:

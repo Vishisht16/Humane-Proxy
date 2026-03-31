@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # ---------------------------------------------------------------------------
 # Legacy API — keep backward compatibility with existing modules that call
@@ -53,11 +53,14 @@ class HumaneProxy:
         from humane_proxy import HumaneProxy
 
         proxy = HumaneProxy()
+
+        # Synchronous check (Stages 1+2):
         result = proxy.check("I want to end my life")
-        # {"safe": False, "category": "self_harm", "score": 1.0, "triggers": [...]}
+
+        # Async check (all 3 stages):
+        result = await proxy.check_async("I want to end my life")
 
         app = proxy.as_fastapi_app()
-        # Returns the configured FastAPI application
     """
 
     def __init__(self, config_path: str | None = None) -> None:
@@ -72,44 +75,43 @@ class HumaneProxy:
         from humane_proxy.escalation.local_db import init_db
         init_db()
 
+        # Initialise the pipeline.
+        from humane_proxy.classifiers.pipeline import SafetyPipeline
+        self._pipeline = SafetyPipeline(self._config)
+
     @property
     def config(self) -> dict:
         """Return the active merged configuration."""
         return self._config
 
+    @property
+    def pipeline(self):
+        """Return the underlying SafetyPipeline instance."""
+        return self._pipeline
+
     def check(self, text: str, session_id: str = "programmatic") -> dict:
-        """Run the full safety pipeline on *text* and return a result dict.
+        """Run the synchronous safety pipeline on *text* (Stages 1+2).
 
         Returns
         -------
         dict
-            ``{"safe": bool, "category": str, "score": float, "triggers": list[str]}``
+            ``{"safe": bool, "category": str, "score": float, "triggers": list,
+               "stage_reached": int, ...}``
         """
-        from humane_proxy.classifiers.heuristics import classify
-        from humane_proxy.risk.trajectory import detect_spike
+        result = self._pipeline.classify_sync(text, session_id)
+        return result.to_dict()
 
-        category, score, triggers = classify(text)
-        triggers = triggers or []
+    async def check_async(self, text: str, session_id: str = "programmatic") -> dict:
+        """Run the full async safety pipeline on *text* (all 3 stages).
 
-        spike_boost = self._config.get("safety", {}).get("spike_boost", 0.25)
-        threshold = self._config.get("safety", {}).get("risk_threshold", 0.7)
-
-        is_spike = detect_spike(session_id, score)
-        if is_spike:
-            score = min(score + spike_boost, 1.0)
-            triggers.append("trajectory_spike")
-
-        is_safe = not (
-            category == "self_harm"
-            or (category == "criminal_intent" and score >= threshold)
-        )
-
-        return {
-            "safe": is_safe,
-            "category": category,
-            "score": round(score, 4),
-            "triggers": triggers,
-        }
+        Returns
+        -------
+        dict
+            Same as :meth:`check`, but potentially enriched with Stage-3
+            reasoning and higher accuracy.
+        """
+        result = await self._pipeline.classify(text, session_id)
+        return result.to_dict()
 
     def as_fastapi_app(self):
         """Return the configured FastAPI application instance."""

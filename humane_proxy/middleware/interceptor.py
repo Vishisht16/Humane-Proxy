@@ -12,23 +12,35 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from humane_proxy import load_config
-from humane_proxy.classifiers.heuristics import classify
 from humane_proxy.escalation.local_db import init_db
 from humane_proxy.escalation.router import escalate
-from humane_proxy.risk.trajectory import detect_spike
 
 logger = logging.getLogger("humane_proxy")
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-_CFG: dict = load_config()
-_RISK_THRESHOLD: float = _CFG.get("safety", {}).get("risk_threshold", 0.7)
-_SPIKE_BOOST: float = _CFG.get("safety", {}).get("spike_boost", 0.25)
 
 LLM_API_KEY: str = os.environ.get("LLM_API_KEY", "")
 LLM_API_URL: str = os.environ.get("LLM_API_URL", "")
+
+
+# ---------------------------------------------------------------------------
+# Pipeline singleton (lazily initialised)
+# ---------------------------------------------------------------------------
+
+_pipeline = None
+
+
+def _get_pipeline():
+    """Return the singleton SafetyPipeline instance."""
+    global _pipeline
+    if _pipeline is None:
+        from humane_proxy.config import get_config
+        from humane_proxy.classifiers.pipeline import SafetyPipeline
+
+        _pipeline = SafetyPipeline(get_config())
+    return _pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -39,14 +51,15 @@ LLM_API_URL: str = os.environ.get("LLM_API_URL", "")
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Initialise resources on startup; clean up on shutdown."""
     init_db()
+    _get_pipeline()  # Warm up the pipeline (triggers Stage-3 warning if needed).
     logger.info("[HumaneProxy] Database initialised.  Server is ready.")
     yield
-    # Shutdown — nothing to tear down in v0.1.
+    # Shutdown — nothing to tear down in v0.2.
 
 
 app = FastAPI(
     title="HumaneProxy",
-    version="0.1.0",
+    version="0.2.0",
     description="Lightweight AI safety middleware that protects humans.",
     lifespan=_lifespan,
 )
@@ -73,38 +86,6 @@ def _extract_last_user_message(payload: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Safety pipeline
-# ---------------------------------------------------------------------------
-
-def _run_safety_pipeline(
-    user_message: str,
-    session_id: str,
-) -> tuple[str, float, list[str]]:
-    """Execute the full safety evaluation pipeline.
-
-    Order
-    -----
-    1. Heuristic classification (category-aware)
-    2. Trajectory spike detection
-    3. Score boost if spike detected
-    4. Escalation decision (handled by the caller)
-    """
-    # Step 1 — Heuristic classifier
-    category, score, triggers = classify(user_message)
-    triggers = triggers or []
-
-    # Step 2 — Trajectory spike detection
-    is_spike: bool = detect_spike(session_id, score)
-
-    # Step 3 — Boost score on spike and record the trigger
-    if is_spike:
-        score = min(score + _SPIKE_BOOST, 1.0)
-        triggers.append("trajectory_spike")
-
-    return category, score, triggers
-
-
-# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -125,33 +106,26 @@ async def chat(request: Request) -> JSONResponse:
             },
         )
 
-    # --- Safety pipeline ---
-    category, risk_score, triggers = _run_safety_pipeline(user_message, session_id)
+    # --- Full async safety pipeline ---
+    pipeline = _get_pipeline()
+    result = await pipeline.classify(user_message, session_id)
 
-    # --- Step 4: Escalation decision ---
-    # Self-harm: always escalate
-    if category == "self_harm":
-        result = escalate(session_id, risk_score, triggers, category)
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "flagged",
-                "category": "self_harm",
-                "message": "Content flagged for review.",
-                "escalation": result,
-            },
+    # --- Escalation decision ---
+    if result.should_escalate:
+        esc = escalate(
+            session_id,
+            result.classification.risk_score if hasattr(result.classification, 'risk_score') else result.classification.score,
+            result.classification.triggers,
+            result.classification.category,
         )
-
-    # Criminal intent: escalate if above threshold
-    if category == "criminal_intent" and risk_score >= _RISK_THRESHOLD:
-        result = escalate(session_id, risk_score, triggers, category)
         return JSONResponse(
             status_code=200,
             content={
                 "status": "flagged",
-                "category": "criminal_intent",
+                "category": result.classification.category,
                 "message": "Content flagged for review.",
-                "escalation": result,
+                "stage_reached": result.classification.stage,
+                "escalation": esc,
             },
         )
 
