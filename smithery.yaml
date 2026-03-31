@@ -1,0 +1,34 @@
+name: humane-proxy
+description: >
+  Lightweight AI safety middleware that protects humans from self-harm and
+  criminal harm. Exposes a 3-stage safety classification pipeline
+  (heuristics → embeddings → reasoning LLM) as MCP tools.
+version: 0.2.0
+license: Apache-2.0
+homepage: https://github.com/Vishisht16/Humane-Proxy
+
+server:
+  type: stdio
+  command: humane-proxy
+  args: [mcp-serve]
+
+tools:
+  - name: check_message_safety
+    description: >
+      Classify a user message for self-harm or criminal intent.
+      Returns safe/flagged result with category, score, and triggers.
+
+  - name: get_session_risk
+    description: >
+      Return the current risk trajectory for a session: trend, spike detection,
+      recent score window, and category distribution.
+
+  - name: list_recent_escalations
+    description: >
+      List recent safety escalation events from the audit log.
+      Optionally filter by category (self_harm / criminal_intent).
+
+optional_env:
+  - OPENAI_API_KEY
+  - GROQ_API_KEY
+  - HUMANE_PROXY_CONFIG

@@ -10,7 +10,7 @@ readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 authors = [
-    {name = "HumaneProxy Contributors"},
+    {name = "Vishisht Mishra", email = "Vishisht16@users.noreply.github.com"},
 ]
 keywords = ["ai-safety", "llm", "middleware", "guardrails", "human-safety"]
 classifiers = [
@@ -46,8 +46,14 @@ dev = [
 ml = [
     "sentence-transformers>=2.2.0",
 ]
+mcp = [
+    "fastmcp>=0.4.0",
+]
 webhooks = [
     "httpx>=0.24.0",
+]
+all = [
+    "humane-proxy[ml,mcp]",
 ]
 
 [project.urls]
@@ -55,12 +61,14 @@ Homepage = "https://github.com/Vishisht16/Humane-Proxy"
 Repository = "https://github.com/Vishisht16/Humane-Proxy"
 Issues = "https://github.com/Vishisht16/Humane-Proxy/issues"
 
-# Ensure config.yaml is included in the built package.
 [tool.setuptools.package-data]
 humane_proxy = ["config.yaml"]
 
 [tool.setuptools.packages.find]
 include = ["humane_proxy*"]
+
+[tool.setuptools.data-files]
+"" = ["smithery.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

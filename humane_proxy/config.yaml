@@ -153,3 +153,72 @@ privacy:
   # If false (default), only a SHA-256 hash of the message is stored
   # in the escalation DB — never the raw text.
   store_message_text: false
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Care Response & Category-Specific Behaviour
+# ---------------------------------------------------------------------------
+
+safety:
+  risk_threshold: 0.7
+  spike_boost: 0.25
+  session_history_limit: 20
+
+  categories:
+    self_harm:
+      # Always notify the operator when self-harm is detected.
+      always_escalate: true
+
+      # "block"   (default / Mode B) — HumaneProxy itself replies with an
+      #           empathetic message and international crisis resources.
+      # "forward" (Mode A) — forward to the upstream LLM with a care-context
+      #           system prompt injected before the user message.
+      response_mode: "block"
+
+      # Optional: override the default block message (leave empty to use built-in).
+      block_message: ""
+
+    criminal_intent:
+      # Score threshold for escalation (below this → only log, no webhook).
+      escalate_threshold: 0.65
+
+      # Score threshold for blocking the request entirely.
+      block_threshold: 0.80
+
+# ---------------------------------------------------------------------------
+# Admin API
+# ---------------------------------------------------------------------------
+
+admin:
+  # Bearer token authentication for /admin/* routes.
+  # Can also be set via: HUMANE_PROXY_ADMIN_KEY env var.
+  # Leave empty to disable the admin API entirely.
+  api_key: ""
+
+# ---------------------------------------------------------------------------
+# Extended Webhook Options (Phase 3)
+# ---------------------------------------------------------------------------
+
+escalation:
+  rate_limit_max: 3
+  rate_limit_window_hours: 1
+
+  webhooks:
+    slack_url: ""
+    discord_url: ""
+    pagerduty_routing_key: ""
+
+    # Microsoft Teams incoming webhook URL (adaptive card format).
+    teams_url: ""
+
+    # Email alert via SMTP (uses stdlib — no extra dependencies).
+    email:
+      # SMTP server settings
+      host: ""
+      port: 587
+      use_tls: true
+      username: ""
+      password: ""
+      from: ""
+      # List of recipient addresses
+      to: []
+

@@ -242,5 +242,102 @@ def version() -> None:
     click.echo(f"HumaneProxy v{__version__}")
 
 
+@main.command()
+@click.option("--category", "-c", default=None,
+              help="Filter by category: self_harm | criminal_intent")
+@click.option("--limit", "-n", default=20, type=int, help="Max records (default 20)")
+@click.option("--session", "-s", default=None, help="Filter by session ID")
+def escalations(category: str | None, limit: int, session: str | None) -> None:
+    """List recent escalation events from the audit log."""
+    import json
+    import sqlite3
+    from humane_proxy.escalation.local_db import _get_db_path
+
+    conn = sqlite3.connect(_get_db_path(), check_same_thread=False)
+    try:
+        clauses, params = [], []
+        if category:
+            clauses.append("category = ?")
+            params.append(category)
+        if session:
+            clauses.append("session_id = ?")
+            params.append(session)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = conn.execute(
+            f"SELECT id, session_id, category, risk_score, timestamp FROM escalations "
+            f"{where} ORDER BY timestamp DESC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        click.echo("  ℹ  No escalations found.")
+        return
+
+    click.echo(f"\n  {'ID':<6} {'Session':<28} {'Category':<18} {'Score':<7} {'When'}")
+    click.echo("  " + "-" * 75)
+    for row in rows:
+        id_, sid, cat, score, ts = row
+        from datetime import datetime, timezone
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        emoji = "🆘" if cat == "self_harm" else "⚠️"
+        click.echo(f"  {id_:<6} {sid:<28} {emoji} {cat:<16} {score:.2f}  {dt}")
+    click.echo("")
+
+
+@main.command()
+@click.argument("session_id")
+def session(session_id: str) -> None:
+    """Show risk trajectory and escalation history for a session."""
+    import json
+    import sqlite3
+    from humane_proxy.escalation.local_db import _get_db_path
+    from humane_proxy.risk.trajectory import analyze
+
+    conn = sqlite3.connect(_get_db_path(), check_same_thread=False)
+    try:
+        rows = conn.execute(
+            "SELECT category, risk_score, timestamp, triggers FROM escalations "
+            "WHERE session_id = ? ORDER BY timestamp ASC",
+            (session_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    click.echo(f"\n  📊 Session: {session_id}")
+    click.echo(f"  Escalation count: {len(rows)}\n")
+
+    if not rows:
+        click.echo("  ℹ  No escalations recorded for this session.")
+        return
+
+    for cat, score, ts, triggers_json in rows:
+        from datetime import datetime, timezone
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        emoji = "🆘" if cat == "self_harm" else "⚠️"
+        try:
+            trigs = json.loads(triggers_json)
+        except Exception:
+            trigs = []
+        click.echo(f"  {emoji} {dt}  score={score:.2f}  category={cat}")
+        if trigs:
+            click.echo(f"     triggers: {', '.join(trigs[:3])}")
+
+    click.echo("")
+
+
+@main.command("mcp-serve")
+def mcp_serve() -> None:
+    """Start the MCP server in stdio mode (requires [mcp] extra)."""
+    try:
+        from humane_proxy.mcp_server import serve
+        click.echo("  🤖 Starting HumaneProxy MCP server...")
+        serve()
+    except RuntimeError as exc:
+        click.echo(f"\n  ❌ {exc}\n", err=True)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     main()

@@ -32,10 +32,10 @@ class TestFlaggedRequests:
         })
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "flagged"
+        # Phase 3: self_harm returns care_response (block mode by default)
+        assert data["status"] in ("care_response", "flagged")
         assert data["category"] == "self_harm"
         assert data["escalation"]["escalated"] is True
-        assert "stage_reached" in data
 
     def test_jailbreak_is_safe(self):
         """Jailbreak attempts should NOT be flagged — they're safe."""
@@ -57,7 +57,8 @@ class TestFlaggedRequests:
             ],
         })
         data = resp.json()
-        assert data["status"] == "flagged"
+        # Phase 3: care_response or flagged — both include category
+        assert data["status"] in ("care_response", "flagged")
         assert "category" in data
 
     def test_criminal_intent_above_threshold(self):
