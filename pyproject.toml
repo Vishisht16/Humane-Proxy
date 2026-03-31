@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "humane-proxy"
-version = "0.2.0"
+version = "0.2.1"
 description = "Lightweight, plug-and-play AI safety middleware that protects humans."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -49,11 +49,15 @@ ml = [
 mcp = [
     "fastmcp>=0.4.0",
 ]
+langchain = [
+    "humane-proxy[mcp]",
+    "langchain-mcp-adapters>=0.1.0",
+]
 webhooks = [
     "httpx>=0.24.0",
 ]
 all = [
-    "humane-proxy[ml,mcp]",
+    "humane-proxy[ml,mcp,langchain]",
 ]
 
 [project.urls]
@@ -68,7 +72,7 @@ humane_proxy = ["config.yaml"]
 include = ["humane_proxy*"]
 
 [tool.setuptools.data-files]
-"" = ["smithery.yaml"]
+"" = ["server.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

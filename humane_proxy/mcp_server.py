@@ -151,3 +151,26 @@ def serve() -> None:
         )
     assert mcp is not None
     mcp.run()
+
+
+def serve_http(host: str = "0.0.0.0", port: int = 3000) -> None:
+    """Start the MCP server in Streamable HTTP mode.
+
+    This exposes the MCP tools over HTTP, making the server compatible
+    with remote MCP clients and registries like Smithery that require
+    a publicly accessible HTTPS endpoint.
+
+    Parameters
+    ----------
+    host:
+        Bind address (default ``"0.0.0.0"``).
+    port:
+        Bind port (default ``3000``).
+    """
+    if not _MCP_AVAILABLE:
+        raise RuntimeError(
+            "MCP server requires fastmcp. Install with: pip install humane-proxy[mcp]"
+        )
+    assert mcp is not None
+    mcp.run(transport="http", host=host, port=port)
+

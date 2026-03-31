@@ -1,0 +1,72 @@
+{
+  "$schema": "https://registry.modelcontextprotocol.io/v0.1/schema/server.json",
+  "name": "io.github.Vishisht16/humane-proxy",
+  "version": "0.2.1",
+  "description": "AI safety middleware that protects humans. Classifies messages for self-harm ideation and criminal intent using a 3-stage cascade pipeline (heuristics → embeddings → reasoning LLM). Returns care responses for self-harm, flags criminal intent, and tracks per-session risk trajectories.",
+  "repository": {
+    "url": "https://github.com/Vishisht16/Humane-Proxy",
+    "source": "github"
+  },
+  "distribution": {
+    "type": "pypi",
+    "package": "humane-proxy"
+  },
+  "tools": [
+    {
+      "name": "check_message_safety",
+      "description": "Classify a user message for self-harm ideation or criminal intent through a 3-stage safety pipeline.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The user message to classify."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Optional session identifier for per-user risk trajectory tracking.",
+            "default": "mcp-default"
+          }
+        },
+        "required": ["message"]
+      }
+    },
+    {
+      "name": "get_session_risk",
+      "description": "Return the current risk trajectory for a session, including spike detection, trend analysis, and category distribution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "The session identifier to query."
+          }
+        },
+        "required": ["session_id"]
+      }
+    },
+    {
+      "name": "list_recent_escalations",
+      "description": "Return recent safety escalation events from the audit log, optionally filtered by category.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of events to return.",
+            "default": 20
+          },
+          "category": {
+            "type": "string",
+            "description": "Filter by category: 'self_harm' or 'criminal_intent'. Omit for all.",
+            "enum": ["self_harm", "criminal_intent"]
+          }
+        }
+      }
+    }
+  ],
+  "installation": {
+    "command": "pip install humane-proxy[mcp]",
+    "run": "humane-proxy mcp-serve"
+  }
+}

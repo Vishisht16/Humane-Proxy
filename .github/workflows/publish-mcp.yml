@@ -1,0 +1,23 @@
+name: Publish MCP
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write
+
+jobs:
+  publish-mcp:
+    name: Publish to MCP Registry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz | tar xz
+          sudo mv mcp-publisher /usr/local/bin/
+
+      - name: Publish to registry
+        run: mcp-publisher publish

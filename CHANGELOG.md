@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.2.1] — 2026-03-31
+
+### Added
+
+- **MCP HTTP transport mode:** `humane-proxy mcp-serve --transport http` exposes tools over Streamable HTTP for remote clients and registry listing.
+- **Official MCP Registry integration:** `server.json` metadata + `publish-mcp.yml` GitHub Actions workflow for automated publishing via OIDC.
+- **LangChain integration:** `humane_proxy.integrations.langchain` module with `get_safety_tools()` and `get_langchain_mcp_config()` helpers. New `[langchain]` install extra.
+- **`<!-- mcp-name: humane-proxy -->`** marker in README for MCP Registry discovery.
+
+### Removed
+
+- `smithery.yaml` — Smithery no longer supports GitHub-based stdio imports; HTTP transport is used instead.
+
+### Changed
+
+- `humane-proxy mcp-serve` now accepts `--transport` (`stdio` | `http`), `--host`, and `--port` options.
+- `[all]` install extra now includes `[langchain]`.
+
+---
+
 ## [0.2.0] — 2026-03-31
 
 ### Added
@@ -30,7 +50,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Enhanced Risk Trajectory:** Trend detection (escalating / stable / declining), category distribution per session, spike detection.
 - **BYOK Stage-3:** Auto-detects `OPENAI_API_KEY` → OpenAI Moderation, `GROQ_API_KEY` → LlamaGuard; prints clear setup guidance if neither is found.
 - **PyPI publish workflow** (`.github/workflows/pypi.yml`) via Trusted Publishers (OIDC, no token needed).
-- **Smithery manifest** (`smithery.yaml`) for one-click MCP cloud deployment.
 
 ### Changed
 

@@ -328,12 +328,26 @@ def session(session_id: str) -> None:
 
 
 @main.command("mcp-serve")
-def mcp_serve() -> None:
-    """Start the MCP server in stdio mode (requires [mcp] extra)."""
+@click.option("--transport", "-t", default="stdio",
+              type=click.Choice(["stdio", "http"]),
+              help="Transport mode: stdio (default) or http")
+@click.option("--host", default="0.0.0.0", help="HTTP bind host (default: 0.0.0.0)")
+@click.option("--port", "-p", default=3000, type=int, help="HTTP bind port (default: 3000)")
+def mcp_serve(transport: str, host: str, port: int) -> None:
+    """Start the MCP server (requires [mcp] extra).
+
+    Use --transport stdio (default) for local integration with agents.
+    Use --transport http for remote access and registry listing.
+    """
     try:
-        from humane_proxy.mcp_server import serve
-        click.echo("  🤖 Starting HumaneProxy MCP server...")
-        serve()
+        if transport == "http":
+            from humane_proxy.mcp_server import serve_http
+            click.echo(f"  🤖 Starting HumaneProxy MCP server (HTTP) on {host}:{port}...")
+            serve_http(host=host, port=port)
+        else:
+            from humane_proxy.mcp_server import serve
+            click.echo("  🤖 Starting HumaneProxy MCP server (stdio)...")
+            serve()
     except RuntimeError as exc:
         click.echo(f"\n  ❌ {exc}\n", err=True)
         sys.exit(1)

@@ -1,5 +1,7 @@
 # 🛡️ HumaneProxy
 
+<!-- mcp-name: humane-proxy -->
+
 **Lightweight, plug-and-play AI safety middleware that protects humans.**
 
 HumaneProxy sits between your users and any LLM. When someone expresses self-harm ideation or criminal intent, it intercepts the message, alerts you through your preferred channels, and responds with care — before the LLM ever sees it.
@@ -288,7 +290,8 @@ curl -X DELETE http://localhost:8000/admin/sessions/user-42 \
 
 ```bash
 pip install humane-proxy[mcp]
-humane-proxy mcp-serve
+humane-proxy mcp-serve                         # stdio (default)
+humane-proxy mcp-serve --transport http --port 3000  # HTTP
 ```
 
 Exposes three tools via Model Context Protocol:
@@ -299,7 +302,29 @@ Exposes three tools via Model Context Protocol:
 | `get_session_risk` | Session trajectory (trend, spike, category counts) |
 | `list_recent_escalations` | Audit log query |
 
-Deploy to Smithery using the included `smithery.yaml`.
+Available on the [Official MCP Registry](https://registry.modelcontextprotocol.io).
+
+---
+
+## LangChain Integration
+
+Plug HumaneProxy safety tools into any LangChain or LangGraph agent:
+
+```bash
+pip install humane-proxy[langchain]
+```
+
+```python
+from humane_proxy.integrations.langchain import get_safety_tools
+
+# Returns LangChain-compatible tools via MCP
+tools = await get_safety_tools()
+# → [check_message_safety, get_session_risk, list_recent_escalations]
+
+# Or get the config dict for MultiServerMCPClient:
+from humane_proxy.integrations.langchain import get_langchain_mcp_config
+config = get_langchain_mcp_config()
+```
 
 ---
 
@@ -351,6 +376,7 @@ privacy:
 | *(none)* | `pip install humane-proxy` | Stage 1 heuristics + full API + CLI |
 | `ml` | `pip install humane-proxy[ml]` | Stage 2 semantic embeddings (`sentence-transformers`) |
 | `mcp` | `pip install humane-proxy[mcp]` | MCP server for AI agent integration (`fastmcp`) |
+| `langchain` | `pip install humane-proxy[langchain]` | LangChain adapter (MCP + `langchain-mcp-adapters`) |
 | `all` | `pip install humane-proxy[all]` | Everything above |
 
 ---
