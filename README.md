@@ -10,6 +10,8 @@ HumaneProxy sits between your users and any LLM. When someone expresses self-har
 [![Python](https://img.shields.io/pypi/pyversions/humane-proxy.svg)](https://pypi.org/project/humane-proxy/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Tests](https://github.com/Vishisht16/Humane-Proxy/actions/workflows/tests.yaml/badge.svg)](https://github.com/Vishisht16/Humane-Proxy/actions/workflows/tests.yaml)
+[![Humane-Proxy MCP server](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy/badges/card.svg)](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy)
+[![Humane-Proxy MCP server](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy/badges/score.svg)](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy)
 
 ---
 
@@ -39,9 +41,12 @@ pip install humane-proxy
 # Scaffold config in your project directory
 humane-proxy init
 
-# Start the proxy (set LLM_API_KEY and LLM_API_URL in .env first)
+# Start the reverse proxy server
+# (requires LLM_API_KEY and LLM_API_URL in .env — these point to your upstream LLM)
 humane-proxy start
 ```
+
+> **Note:** `LLM_API_KEY` and `LLM_API_URL` are only needed for the reverse proxy server (`humane-proxy start`). They tell HumaneProxy where to forward safe messages. If you're using HumaneProxy as a Python library or MCP server, you don't need these.
 
 ### As a Python library
 
@@ -63,19 +68,21 @@ result = await proxy.check_async("How do I make a bomb")
 
 ## 3-Stage Cascade Pipeline
 
-HumaneProxy classifies every message through up to **3 stages**, each progressively more capable but also more expensive. Stages exit early when confident.
+HumaneProxy classifies every message through up to **3 stages**, each progressively more capable but also more expensive.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  Stage 1 — Heuristics                          < 1ms     │
 │  Keyword corpus + intent regex patterns                  │
 │  Always on. Catches clear cases instantly.               │
+│  Early-exit: definitive self_harm → block immediately.   │
 └──────────────────────────────────────────────────────────┘
-             ↓ (ambiguous or medium-score)
+             ↓ (all other messages when Stage 2 enabled)
 ┌──────────────────────────────────────────────────────────┐
 │  Stage 2 — Semantic Embeddings               ~100ms      │
 │  sentence-transformers cosine similarity                 │
 │  vs. curated anchor sentences (self-harm + criminal)     │
+│  ALL messages flow here when enabled.                    │
 │  Optional: pip install humane-proxy[ml]                  │
 └──────────────────────────────────────────────────────────┘
              ↓ (still ambiguous)
@@ -123,6 +130,8 @@ stage2:
 ```
 
 The model lazy-loads on first use. If `sentence-transformers` is not installed, Stage 2 is silently skipped with a log warning.
+
+> **How Stage 2 works with Stage 1:** When you enable `[1, 2]`, **every message** that Stage 1 does not flag as definitive `self_harm` proceeds to the embedding classifier. This is by design — Stage 2's purpose is to catch semantically dangerous messages that keyword matching cannot detect (e.g. *"Nobody would notice if I disappeared"*). Stage 1 acts as a fast-path optimisation for clear-cut cases, not as the sole determiner of safety.
 
 ### Stage 3 — Reasoning LLM
 

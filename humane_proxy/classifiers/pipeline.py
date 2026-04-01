@@ -149,8 +149,15 @@ class SafetyPipeline:
             self._stage3 = None
 
     def _show_stage3_warning(self) -> None:
-        """Log a clear guidance message when Stage 3 is not active."""
+        """Log a clear guidance message when Stage 3 is not active.
+
+        Only shown when the user has explicitly enabled Stage 3 in their
+        ``enabled_stages`` config but no provider could be initialised
+        (typically because no API key is set).
+        """
         global _stage3_warning_shown
+        if 3 not in self.enabled_stages:
+            return  # User didn't ask for Stage 3 — no warning needed.
         if self._stage3 is not None or _stage3_warning_shown:
             return
         _stage3_warning_shown = True
@@ -186,12 +193,21 @@ class SafetyPipeline:
         if result.category == "self_harm":
             return self._finalize(result, session_id, text)
 
-        # Early exit: clear safe.
-        if result.score <= self.stage1_ceiling and result.category == "safe":
+        # Early exit: clear safe — but only when no later stages can
+        # add value.  When Stage 2 is enabled, messages that heuristics
+        # consider safe MUST still flow to the embedding classifier
+        # (that is its entire purpose: catching semantically dangerous
+        # content that keyword matching misses).
+        stage2_enabled = 2 in self.enabled_stages and self._stage2 is not None
+        if (
+            not stage2_enabled
+            and result.score <= self.stage1_ceiling
+            and result.category == "safe"
+        ):
             return self._finalize(result, session_id, text)
 
         # Stage 2 — Embeddings (if enabled).
-        if 2 in self.enabled_stages and self._stage2 is not None:
+        if stage2_enabled:
             s2 = self._stage2.classify(text)
             result = self._combine(result, s2)
 
@@ -225,10 +241,15 @@ class SafetyPipeline:
         if result.category == "self_harm":
             return self._finalize(result, session_id, text)
 
-        if result.score <= self.stage1_ceiling and result.category == "safe":
+        stage2_enabled = 2 in self.enabled_stages and self._stage2 is not None
+        if (
+            not stage2_enabled
+            and result.score <= self.stage1_ceiling
+            and result.category == "safe"
+        ):
             return self._finalize(result, session_id, text)
 
-        if 2 in self.enabled_stages and self._stage2 is not None:
+        if stage2_enabled:
             s2 = self._stage2.classify(text)
             result = self._combine(result, s2)
 

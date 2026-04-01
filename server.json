@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.Vishisht16/humane-proxy",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "AI safety middleware — detects self-harm and criminal intent in LLM prompts.",
   "repository": {
     "url": "https://github.com/Vishisht16/Humane-Proxy",
@@ -11,7 +11,7 @@
     {
       "registryType": "pypi",
       "identifier": "humane-proxy",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "packageArguments": [
         {
           "type": "positional",

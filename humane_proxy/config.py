@@ -104,6 +104,18 @@ def _apply_env_overrides(config: dict) -> dict:
             node = node.setdefault(part, {})
         node[path[-1]] = value
 
+    # Special handling: HUMANE_PROXY_ENABLED_STAGES (comma-separated ints).
+    stages_raw = os.environ.get("HUMANE_PROXY_ENABLED_STAGES")
+    if stages_raw:
+        try:
+            stages = [int(s.strip()) for s in stages_raw.split(",") if s.strip()]
+            config.setdefault("pipeline", {})["enabled_stages"] = stages
+        except ValueError:
+            logger.warning(
+                "Invalid HUMANE_PROXY_ENABLED_STAGES=%r (expected comma-separated ints), skipping",
+                stages_raw,
+            )
+
     return config
 
 

@@ -198,7 +198,11 @@ class TestPipelineFullAsync:
 
         pipeline = SafetyPipeline(config)
 
+        # Stage 2 IS called (by design — it catches what heuristics miss).
         mock_s2 = MagicMock()
+        mock_s2.classify.return_value = ClassificationResult(
+            category="safe", score=0.0, triggers=[], stage=2,
+        )
         pipeline._stage2 = mock_s2
 
         mock_s3 = AsyncMock()
@@ -206,8 +210,9 @@ class TestPipelineFullAsync:
 
         result = await pipeline.classify("What time is it?", "test-early")
         assert result.classification.category == "safe"
-        # Stage 2 should NOT have been called (early exit after Stage 1).
-        mock_s2.classify.assert_not_called()
+        # Stage 2 is called (all messages flow through when enabled).
+        mock_s2.classify.assert_called_once()
+        # Stage 3 is NOT called (Stage 2 returned safe below ceiling).
         mock_s3.classify.assert_not_called()
 
     @pytest.mark.asyncio
@@ -261,7 +266,7 @@ class TestCombineLogic:
 
 
 class TestStage3Warning:
-    def test_warning_logged_when_no_stage3(self, caplog):
+    def test_warning_logged_when_stage3_enabled_but_no_provider(self, caplog):
         import humane_proxy.classifiers.pipeline as pipe_mod
         pipe_mod._stage3_warning_shown = False  # reset flag
 
@@ -277,3 +282,124 @@ class TestStage3Warning:
 
         # Reset.
         pipe_mod._stage3_warning_shown = False
+
+    def test_no_warning_when_stage3_not_in_enabled_stages(self, caplog):
+        """Users with enabled_stages: [1, 2] should NOT see the Stage 3 warning."""
+        import humane_proxy.classifiers.pipeline as pipe_mod
+        pipe_mod._stage3_warning_shown = False
+
+        config = _base_config()
+        config["pipeline"]["enabled_stages"] = [1, 2]
+
+        import logging
+        with caplog.at_level(logging.WARNING, logger="humane_proxy.pipeline"):
+            SafetyPipeline(config)
+
+        assert not any("Stage-3 classification is DISABLED" in r.message for r in caplog.records)
+
+        pipe_mod._stage3_warning_shown = False
+
+    def test_no_warning_when_only_stage1(self, caplog):
+        """Users with enabled_stages: [1] should NOT see the Stage 3 warning."""
+        import humane_proxy.classifiers.pipeline as pipe_mod
+        pipe_mod._stage3_warning_shown = False
+
+        config = _base_config()
+        config["pipeline"]["enabled_stages"] = [1]
+
+        import logging
+        with caplog.at_level(logging.WARNING, logger="humane_proxy.pipeline"):
+            SafetyPipeline(config)
+
+        assert not any("Stage-3 classification is DISABLED" in r.message for r in caplog.records)
+
+        pipe_mod._stage3_warning_shown = False
+
+
+class TestStage2EarlyExitFix:
+    """Verify that Stage 2 is always invoked when enabled, even for messages
+    that Stage 1 considers safe (score=0.0).  This was the v0.2.2 bug:
+    Stage 2 never ran because the early-exit logic short-circuited it."""
+
+    def test_stage2_called_for_safe_stage1_message(self):
+        """When Stage 2 enabled, safe Stage-1 messages must flow to Stage 2."""
+        config = _base_config()
+        config["pipeline"]["enabled_stages"] = [1, 2]
+
+        pipeline = SafetyPipeline(config)
+
+        mock_s2 = MagicMock()
+        mock_s2.classify.return_value = ClassificationResult(
+            category="safe", score=0.0, triggers=[], stage=2,
+        )
+        pipeline._stage2 = mock_s2
+
+        # This message scores 0.0 on heuristics — previously early-exited.
+        pipeline.classify_sync("What is the weather today?", "test-fix-1")
+        mock_s2.classify.assert_called_once()
+
+    def test_stage2_not_called_when_not_enabled(self):
+        """When enabled_stages is [1], Stage 2 should never be called."""
+        config = _base_config()
+        config["pipeline"]["enabled_stages"] = [1]
+
+        pipeline = SafetyPipeline(config)
+
+        mock_s2 = MagicMock()
+        pipeline._stage2 = mock_s2
+
+        pipeline.classify_sync("What is the weather today?", "test-fix-2")
+        mock_s2.classify.assert_not_called()
+
+    def test_stage2_catches_ambiguous_message(self):
+        """Stage 2 should catch semantically dangerous messages that Stage 1 misses."""
+        config = _base_config()
+        config["pipeline"]["enabled_stages"] = [1, 2]
+
+        pipeline = SafetyPipeline(config)
+
+        mock_s2 = MagicMock()
+        mock_s2.classify.return_value = ClassificationResult(
+            category="self_harm", score=0.65,
+            triggers=["embedding:self_harm:0.650"], stage=2,
+        )
+        pipeline._stage2 = mock_s2
+
+        result = pipeline.classify_sync(
+            "Nobody would notice if I disappeared", "test-fix-3"
+        )
+        assert result.classification.category == "self_harm"
+        assert result.should_escalate is True
+        mock_s2.classify.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stage2_called_in_async_path(self):
+        """Async classify() also invokes Stage 2 for safe Stage-1 messages."""
+        config = _base_config()
+        config["pipeline"]["enabled_stages"] = [1, 2]
+
+        pipeline = SafetyPipeline(config)
+
+        mock_s2 = MagicMock()
+        mock_s2.classify.return_value = ClassificationResult(
+            category="safe", score=0.0, triggers=[], stage=2,
+        )
+        pipeline._stage2 = mock_s2
+
+        await pipeline.classify("Hello world", "test-fix-async")
+        mock_s2.classify.assert_called_once()
+
+    def test_self_harm_from_stage1_still_early_exits(self):
+        """Definitive self_harm from Stage 1 should still skip Stage 2."""
+        config = _base_config()
+        config["pipeline"]["enabled_stages"] = [1, 2]
+
+        pipeline = SafetyPipeline(config)
+
+        mock_s2 = MagicMock()
+        pipeline._stage2 = mock_s2
+
+        result = pipeline.classify_sync("I want to kill myself", "test-fix-4")
+        assert result.classification.category == "self_harm"
+        mock_s2.classify.assert_not_called()
+

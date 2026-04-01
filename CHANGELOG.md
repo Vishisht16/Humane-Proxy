@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.2.3] — 2026-04-01
+
+### Fixed
+
+- **Stage 2 never ran:** The pipeline's early-exit logic was too aggressive — when Stage 1 scored a message as safe (score 0.0), it would early-exit before the embedding classifier had a chance to evaluate it. This defeated Stage 2's entire purpose: catching *semantically* dangerous messages that keyword matching misses. Now, when Stage 2 is enabled, all messages that Stage 1 does not flag as `self_harm` proceed to the embedding classifier.
+- **Stage 3 warning shown incorrectly:** Users with `enabled_stages: [1]` or `[1, 2]` saw a Stage 3 "DISABLED" warning even though they never configured Stage 3. The warning now only appears when `3` is in `enabled_stages` but no API key / provider is available.
+- **`HUMANE_PROXY_ENABLED_STAGES` env var not wired up:** Documented in README but not implemented in the config loader. Now accepts comma-separated ints (e.g. `"1,2"`).
+- **FastAPI app version** pinned to `0.2.0` — updated to `0.2.3`.
+
+### Added
+
+- **`glama.json`** metadata for Glama MCP directory listing.
+- **Real embedding model tests:** New `TestEmbeddingClassifierReal` test class that exercises the full `all-MiniLM-L6-v2` classify flow (guarded by `pytest.importorskip`, auto-skipped in CI).
+- **Pipeline early-exit regression tests:** `TestStage2EarlyExitFix` class verifying that Stage 2 is always invoked when enabled, even for messages heuristics considers safe.
+- **Stage 3 warning tests:** Tests that verify the warning is only shown when Stage 3 is in `enabled_stages`.
+- **Glama badges** in README for MCP server card and quality score.
+
+### Changed
+
+- README updated to clarify Stage 2 behaviour: when enabled, all messages flow through the embedding classifier. Stage 1 heuristics becomes an early-exit optimisation for clear self-harm only, not a safety determiner.
+- README updated to clarify `LLM_API_KEY` / `LLM_API_URL` are only needed for the reverse proxy server, not for the library API or MCP server.
+
+---
+
 ## [0.2.2] — 2026-03-31
 
 ### Added
