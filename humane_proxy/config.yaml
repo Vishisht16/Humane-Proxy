@@ -97,6 +97,18 @@ trajectory:
   # Delta threshold: if current_score - mean(last N) > spike_delta, flag it.
   spike_delta: 0.35
 
+  # Exponential time-decay half-life (hours).
+  # After this many hours, a historical score carries only 50 % of its
+  # original weight in the rolling baseline.  This prevents stale data
+  # from penalising returning users while still catching rapid escalation.
+  #
+  # Examples:
+  #   24  → a score from yesterday has 50 % weight (default)
+  #   6   → aggressive decay; only very recent history matters
+  #   72  → gentle decay; multi-day memory
+  #   0   → disable decay entirely (plain unweighted mean)
+  decay_half_life_hours: 24.0
+
 escalation:
   # Per-session rate limiting for escalation logging.
   rate_limit_max: 3

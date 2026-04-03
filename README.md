@@ -129,6 +129,8 @@ stage2:
   safe_threshold: 0.35         # cosine similarity below this → safe
 ```
 
+> **Multilingual Support:** If your users converse in non-English languages (Roman Hindi, Spanish, Arabic, etc.), change the `model` in your configuration to `"paraphrase-multilingual-MiniLM-L12-v2"`. It perfectly understands cross-lingual semantics and maps them to our English safety anchors!
+
 The model lazy-loads on first use. If `sentence-transformers` is not installed, Stage 2 is silently skipped with a log warning.
 
 > **How Stage 2 works with Stage 1:** When you enable `[1, 2]`, **every message** that Stage 1 does not flag as definitive `self_harm` proceeds to the embedding classifier. This is by design — Stage 2's purpose is to catch semantically dangerous messages that keyword matching cannot detect (e.g. *"Nobody would notice if I disappeared"*). Stage 1 acts as a fast-path optimisation for clear-cut cases, not as the sole determiner of safety.
@@ -213,6 +215,67 @@ safety:
 ```
 
 The injected system prompt instructs the LLM to respond with empathy, validate feelings, provide crisis resources, and encourage professional support.
+
+---
+
+## Risk Trajectory & Time-Decay
+
+HumaneProxy tracks a **rolling window** of the last 5 risk scores per session.
+When a new message arrives, its score is compared against the
+**decay-weighted mean** of that window:
+
+```
+delta = current_score − weighted_mean(last N scores)
+spike = delta > 0.35    (configurable via spike_delta)
+```
+
+If a spike is detected, a **boost penalty** (`+0.25`) is added to the
+current score to push it closer to escalation.
+
+### Exponential Time-Decay
+
+Historical scores are weighted using the formula:
+
+$$w_i = e^{-\lambda \, \Delta t_i}$$
+
+where **λ = ln(2) / half-life** and **Δt** is the age of each score in
+seconds.  This means:
+
+| Time elapsed | Weight (24 h half-life) | Meaning |
+|---|---|---|
+| 5 minutes | 99.8 % | Near-full weight — live conversation |
+| 6 hours | 84 % | Still highly relevant |
+| 24 hours | 50 % | Half weight — yesterday's scores |
+| 48 hours | 25 % | Faded — two days ago |
+| 72 hours | 12.5 % | Nearly forgotten |
+
+**Why this matters:** Without decay, a user who had a tough conversation
+on Monday would carry that elevated baseline into Thursday—unfairly
+triggering spikes on innocuous messages.  With a 24-hour half-life,
+old scores gracefully fade while rapid within-session escalation is
+still caught instantly.
+
+### Configuration
+
+```yaml
+trajectory:
+  window_size: 5          # messages in rolling window
+  spike_delta: 0.35       # delta threshold for spike detection
+
+  # Half-life in hours.  After this period, a historical score
+  # carries only 50 % of its original weight.
+  #   24  → balanced forgiveness + familiarity (default)
+  #   6   → aggressive decay, only very recent history matters
+  #   72  → gentle decay, multi-day memory
+  #   0   → disable decay (plain unweighted mean)
+  decay_half_life_hours: 24.0
+```
+
+Or via environment variable:
+
+```bash
+export HUMANE_PROXY_DECAY_HALF_LIFE=12   # 12-hour half-life
+```
 
 ---
 

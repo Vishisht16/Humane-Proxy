@@ -2,8 +2,7 @@ FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     GLAMA_VERSION="1.0.0" \
-    PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH"
+    PYTHONUNBUFFERED=1
 
 # Install Node.js (for mcp-proxy) and Python/uv
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git \
@@ -22,4 +21,5 @@ WORKDIR /app
 COPY . .
 RUN uv sync --extra all
 
-CMD ["mcp-proxy", "--", "humane-proxy", "mcp-serve"]
+CMD ["mcp-proxy","--","/app/.venv/bin/humane-proxy","mcp-serve"]
+

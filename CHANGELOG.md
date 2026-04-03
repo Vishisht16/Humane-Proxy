@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.3.1] - 2026-04-03
+
+### Fixed
+
+- Fixed `mcp-serve` stdout logging bug breaking the MCP `stdio` JSON-RPC transport protocol.
+
+### Added
+
+- **Exponential time-decay** for risk trajectory: historical scores are weighted by `e^{-λΔt}` with a configurable half-life (default 24 h). Prevents stale history from penalising returning users while keeping rapid-escalation detection intact.
+- Environment variable `HUMANE_PROXY_DECAY_HALF_LIFE` to configure the decay half-life in hours.
+- Added multilingual embedding model (`paraphrase-multilingual-MiniLM-L12-v2`) recommendation in documentation for non-English coverage.
+
+---
+
 ## [0.3.0] — 2026-04-03
 
 ### Added

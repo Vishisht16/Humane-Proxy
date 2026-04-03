@@ -346,7 +346,7 @@ def mcp_serve(transport: str, host: str, port: int) -> None:
             serve_http(host=host, port=port)
         else:
             from humane_proxy.mcp_server import serve
-            click.echo("  🤖 Starting HumaneProxy MCP server (stdio)...")
+            click.echo("  🤖 Starting HumaneProxy MCP server (stdio)...", err=True)
             serve()
     except RuntimeError as exc:
         click.echo(f"\n  ❌ {exc}\n", err=True)

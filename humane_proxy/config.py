@@ -88,6 +88,7 @@ def _apply_env_overrides(config: dict) -> dict:
         "HUMANE_PROXY_STORAGE_BACKEND": (["storage", "backend"], str),
         "HUMANE_PROXY_REDIS_URL": (["storage", "redis", "url"], str),
         "HUMANE_PROXY_POSTGRES_DSN": (["storage", "postgres", "dsn"], str),
+        "HUMANE_PROXY_DECAY_HALF_LIFE": (["trajectory", "decay_half_life_hours"], float),
     }
 
     for env_key, (path, cast) in _ENV_MAP.items():
