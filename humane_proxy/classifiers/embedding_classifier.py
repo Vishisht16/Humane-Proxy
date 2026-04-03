@@ -29,6 +29,8 @@ so the pipeline gracefully degrades to Stage 1 only.
 from __future__ import annotations
 
 import logging
+import os
+import threading
 from typing import Any
 
 from humane_proxy.classifiers.models import ClassificationResult
@@ -47,6 +49,13 @@ except ImportError:
     _ML_AVAILABLE = False
     np = None  # type: ignore[assignment]
     SentenceTransformer = None  # type: ignore[assignment,misc]
+
+# ---------------------------------------------------------------------------
+# Process-level model singleton cache.
+# Keyed by model name so different configs don't clash.
+# ---------------------------------------------------------------------------
+_model_cache: dict[str, Any] = {}
+_model_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Anchor sentences — diverse, realistic expressions of each category.
@@ -78,6 +87,22 @@ CRIMINAL_ANCHORS: list[str] = [
     "How do I make ricin at home",
 ]
 
+# ---------------------------------------------------------------------------
+# Benign anchors — phrases in the same semantic neighbourhood as self-harm
+# but with non-harmful intent.  Used for ambiguity dampening.
+# ---------------------------------------------------------------------------
+
+BENIGN_ANCHORS: list[str] = [
+    "I feel like there's no point in continuing this project anymore",
+    "There's no reason to keep playing this game",
+    "I want to quit my job and move on",
+    "Life feels monotonous and boring lately",
+    "I'm done with this conversation",
+    "I see no point in arguing anymore",
+    "I want to give up on this assignment",
+    "Nothing about this task matters to me anymore",
+]
+
 ANCHORS: dict[str, list[str]] = {
     "self_harm": SELF_HARM_ANCHORS,
     "criminal_intent": CRIMINAL_ANCHORS,
@@ -101,6 +126,43 @@ def _cosine_similarity(a: Any, b: Any) -> float:
     return dot / (norm_a * norm_b)
 
 
+def _load_model_singleton(model_name: str) -> Any:
+    """Load a SentenceTransformer model exactly once per process.
+
+    Thread-safe.  Subsequent calls with the same *model_name* return
+    the cached instance without any disk I/O.
+    """
+    if model_name in _model_cache:
+        return _model_cache[model_name]
+
+    with _model_lock:
+        # Double-check after acquiring lock.
+        if model_name in _model_cache:
+            return _model_cache[model_name]
+
+        if not _ML_AVAILABLE:
+            return None
+
+        # Suppress noisy transformers progress bars and weight-load reports.
+        old_verbosity = os.environ.get("TRANSFORMERS_VERBOSITY")
+        os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+        try:
+            model = SentenceTransformer(model_name)
+            # Warm-up encode to force any lazy JIT / CUDA init.
+            model.encode(["warmup"], show_progress_bar=False)
+            _model_cache[model_name] = model
+            logger.info("Stage-2 model loaded and cached: %s", model_name)
+            return model
+        except Exception:
+            logger.exception("Failed to load embedding model: %s", model_name)
+            return None
+        finally:
+            if old_verbosity is None:
+                os.environ.pop("TRANSFORMERS_VERBOSITY", None)
+            else:
+                os.environ["TRANSFORMERS_VERBOSITY"] = old_verbosity
+
+
 # ---------------------------------------------------------------------------
 # Embedding Classifier
 # ---------------------------------------------------------------------------
@@ -109,8 +171,11 @@ def _cosine_similarity(a: Any, b: Any) -> float:
 class EmbeddingClassifier:
     """Stage-2 classifier using sentence-transformer embeddings.
 
-    Lazy-loads the model on first ``classify()`` call.  If the ML
-    dependencies are not installed, every call returns a neutral result.
+    Uses a process-level model singleton — the model is loaded once per
+    process and reused across all ``EmbeddingClassifier`` instances.
+
+    If the ML dependencies are not installed, every call returns a neutral
+    result.
 
     Parameters
     ----------
@@ -122,6 +187,7 @@ class EmbeddingClassifier:
         self._config: dict = config.get("stage2", {})
         self._model: Any = None
         self._anchor_embeddings: dict[str, Any] = {}
+        self._benign_embeddings: Any = None
         self._loaded: bool = False
 
     @property
@@ -143,18 +209,19 @@ class EmbeddingClassifier:
             return
 
         model_name = self._config.get("model", "all-MiniLM-L6-v2")
-        try:
-            self._model = SentenceTransformer(model_name)
+        self._model = _load_model_singleton(model_name)
+        if self._model is not None:
             self._precompute_anchors()
-            logger.info("Stage-2 embedding classifier loaded: %s", model_name)
-        except Exception:
-            logger.exception("Failed to load embedding model: %s", model_name)
-            self._model = None
 
     def _precompute_anchors(self) -> None:
         """Encode all anchor sentences and cache the vectors."""
         for category, sentences in ANCHORS.items():
-            self._anchor_embeddings[category] = self._model.encode(sentences)
+            self._anchor_embeddings[category] = self._model.encode(
+                sentences, show_progress_bar=False,
+            )
+        self._benign_embeddings = self._model.encode(
+            BENIGN_ANCHORS, show_progress_bar=False,
+        )
 
     def classify(self, text: str) -> ClassificationResult:
         """Classify *text* using semantic similarity to anchor sentences.
@@ -168,7 +235,7 @@ class EmbeddingClassifier:
             return ClassificationResult(stage=2)
 
         # Encode the query text.
-        query_vec = self._model.encode([text])[0]
+        query_vec = self._model.encode([text], show_progress_bar=False)[0]
 
         # Score against each category's anchors.
         category_scores: dict[str, float] = {}
@@ -190,9 +257,35 @@ class EmbeddingClassifier:
         # Normalise to [0, 1].
         normalised = max(0.0, min(1.0, best_score))
 
+        triggers = [f"embedding:{best_cat}:{normalised:.3f}"]
+
+        # -------------------------------------------------------------------
+        # Ambiguity dampening: if the score sits in the grey zone for
+        # self_harm, compare against benign anchors.  If benign semantics
+        # are competitive, halve the score to avoid false positives.
+        # -------------------------------------------------------------------
+        ambiguity_low = self._config.get("ambiguity_low", 0.30)
+        ambiguity_high = self._config.get("ambiguity_high", 0.55)
+        ambiguity_margin = self._config.get("ambiguity_margin", 0.05)
+
+        if (
+            best_cat == "self_harm"
+            and ambiguity_low <= normalised <= ambiguity_high
+            and self._benign_embeddings is not None
+        ):
+            benign_sims = [
+                _cosine_similarity(query_vec, bv)
+                for bv in self._benign_embeddings
+            ]
+            top_benign = max(benign_sims) if benign_sims else 0.0
+
+            if top_benign >= (normalised - ambiguity_margin):
+                normalised *= 0.5
+                triggers.append("embedding:ambiguity_dampened")
+
         return ClassificationResult(
             category=best_cat,
             score=normalised,
-            triggers=[f"embedding:{best_cat}:{normalised:.3f}"],
+            triggers=triggers,
             stage=2,
         )

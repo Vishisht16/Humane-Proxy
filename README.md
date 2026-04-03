@@ -10,8 +10,8 @@ HumaneProxy sits between your users and any LLM. When someone expresses self-har
 [![Python](https://img.shields.io/pypi/pyversions/humane-proxy.svg)](https://pypi.org/project/humane-proxy/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Tests](https://github.com/Vishisht16/Humane-Proxy/actions/workflows/tests.yaml/badge.svg)](https://github.com/Vishisht16/Humane-Proxy/actions/workflows/tests.yaml)
-[![Humane-Proxy MCP server](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy/badges/card.svg)](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy)
 [![Humane-Proxy MCP server](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy/badges/score.svg)](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy)
+[![Humane-Proxy MCP server](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy/badges/card.svg)](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy)
 
 ---
 
@@ -188,6 +188,10 @@ HumaneProxy returns an empathetic message with crisis resources for 10+ countrie
 safety:
   categories:
     self_harm:
+      # Self-harm escalation threshold (0.0 to 1.0).
+      # Scores below this are downgraded to safe.
+      escalate_threshold: 0.5
+
       response_mode: "block"     # default
 
       # Optional: override the built-in message
@@ -238,6 +242,10 @@ escalation:
       to:
         - "safety-team@yourorg.com"
         - "oncall@yourorg.com"
+
+# Swappable Storage Backend (sqlite config default, redis/postgres optional)
+storage:
+  backend: "sqlite"  # or "redis", "postgres"
 ```
 
 ---
@@ -287,10 +295,13 @@ curl -X DELETE http://localhost:8000/admin/sessions/user-42 \
 
 | Endpoint | Description |
 |---|---|
-| `GET /admin/escalations` | Paginated list, filterable by `category`, `session_id` |
+| `GET /admin/health` | Health check (no auth required) |
+| `GET /admin/config` | Active config view (secrets redacted) |
+| `GET /admin/escalations` | Paginated list, filterable by `category`, `session_id`, `date`, sortable |
+| `GET /admin/escalations/export` | CSV export of escalations |
 | `GET /admin/escalations/{id}` | Single escalation detail |
 | `GET /admin/sessions/{id}/risk` | Session history + trajectory |
-| `GET /admin/stats` | Aggregate counts by category and day |
+| `GET /admin/stats` | Aggregate counts, top sessions, hourly breakdown |
 | `DELETE /admin/sessions/{id}` | Delete all session records |
 
 ---
@@ -315,10 +326,38 @@ Available on the [Official MCP Registry](https://registry.modelcontextprotocol.i
 
 ---
 
-## LangChain Integration
+## AI Agent Integrations
 
-Plug HumaneProxy safety tools into any LangChain or LangGraph agent:
+HumaneProxy tools can be natively plugged into standard agentic frameworks:
 
+### LlamaIndex
+```bash
+pip install humane-proxy[llamaindex]
+```
+```python
+from humane_proxy.integrations.llamaindex import get_safety_tools
+tools = get_safety_tools() # Native FunctionTool instances
+```
+
+### CrewAI
+```bash
+pip install humane-proxy[crewai]
+```
+```python
+from humane_proxy.integrations.crewai import get_safety_tools
+tools = get_safety_tools() # Native BaseTool subclass instances
+```
+
+### AutoGen (AG2)
+```bash
+pip install humane-proxy[autogen]
+```
+```python
+from humane_proxy.integrations.autogen import register_safety_tools
+register_safety_tools(assistant, user_proxy)
+```
+
+### LangChain
 ```bash
 pip install humane-proxy[langchain]
 ```
@@ -344,15 +383,17 @@ All values can be set in `humane_proxy.yaml` (project root) or via `HUMANE_PROXY
 | YAML key | Env var | Default | Description |
 |---|---|---|---|
 | `safety.risk_threshold` | `HUMANE_PROXY_RISK_THRESHOLD` | `0.7` | Score threshold for criminal_intent escalation |
-| `safety.spike_boost` | — | `0.25` | Score boost on trajectory spike |
+| `safety.categories.self_harm.escalate_threshold` | `HUMANE_PROXY_SELF_HARM_THRESHOLD` | `0.5` | Score threshold for self_harm escalation |
+| `safety.spike_boost` | `HUMANE_PROXY_SPIKE_BOOST` | `0.25` | Score boost on trajectory spike |
 | `server.port` | `HUMANE_PROXY_PORT` | `8000` | Proxy port |
-| `pipeline.enabled_stages` | `HUMANE_PROXY_ENABLED_STAGES` | `[1]` | Active stages |
+| `pipeline.enabled_stages` | `HUMANE_PROXY_ENABLED_STAGES` | `[1]` | Active stages (e.g. `1,2,3`) |
 | `pipeline.stage1_ceiling` | `HUMANE_PROXY_STAGE1_CEILING` | `0.3` | Early exit after Stage 1 |
 | `pipeline.stage2_ceiling` | `HUMANE_PROXY_STAGE2_CEILING` | `0.4` | Early exit after Stage 2 |
 | `stage3.provider` | `HUMANE_PROXY_STAGE3_PROVIDER` | `"auto"` | Stage 3 provider |
 | `stage3.timeout` | `HUMANE_PROXY_STAGE3_TIMEOUT` | `10` | Stage 3 timeout (s) |
 | `privacy.store_message_text` | — | `false` | Store raw text (vs SHA-256 hash) |
-| `escalation.rate_limit_max` | — | `3` | Max alerts per session/window |
+| `escalation.rate_limit_max` | `HUMANE_PROXY_RATE_LIMIT_MAX` | `3` | Max alerts per session/window |
+| `storage.backend` | `HUMANE_PROXY_STORAGE_BACKEND` | `"sqlite"` | `"sqlite"`, `"redis"`, `"postgres"` |
 | `safety.categories.self_harm.response_mode` | — | `"block"` | `"block"` or `"forward"` |
 
 ---
@@ -382,11 +423,16 @@ privacy:
 
 | Extra | Command | What it adds |
 |---|---|---|
-| *(none)* | `pip install humane-proxy` | Stage 1 heuristics + full API + CLI |
+| *(none)* | `pip install humane-proxy` | Stage 1 heuristics + default SQLite storage |
 | `ml` | `pip install humane-proxy[ml]` | Stage 2 semantic embeddings (`sentence-transformers`) |
 | `mcp` | `pip install humane-proxy[mcp]` | MCP server for AI agent integration (`fastmcp`) |
+| `redis` | `pip install humane-proxy[redis]` | Redis storage backend (`redis`) |
+| `postgres` | `pip install humane-proxy[postgres]` | PostgreSQL storage backend (`psycopg`, `psycopg_pool`) |
+| `llamaindex` | `pip install humane-proxy[llamaindex]` | LlamaIndex native integration (`llama-index-core`) |
+| `crewai` | `pip install humane-proxy[crewai]` | CrewAI native integration (`crewai[tools]`) |
+| `autogen` | `pip install humane-proxy[autogen]` | AutoGen native integration (`autogen-agentchat`) |
 | `langchain` | `pip install humane-proxy[langchain]` | LangChain adapter (MCP + `langchain-mcp-adapters`) |
-| `all` | `pip install humane-proxy[all]` | Everything above |
+| `all` | `pip install humane-proxy[all]` | Includes ALL optional dependencies above |
 
 ---
 

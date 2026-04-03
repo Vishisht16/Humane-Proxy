@@ -25,12 +25,7 @@ except ImportError:
 
 if _MCP_AVAILABLE:
     mcp = FastMCP(
-        name="humane-proxy",
-        description=(
-            "AI safety middleware that protects humans from self-harm and "
-            "criminal harm. Run a text through the 3-stage cascade pipeline, "
-            "or query session risk trajectory."
-        ),
+        "humane-proxy"
     )
 
     @mcp.tool()

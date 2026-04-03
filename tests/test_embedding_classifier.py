@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from humane_proxy.classifiers.models import ClassificationResult
+from humane_proxy.classifiers.embedding_classifier import _model_cache
 
+@pytest.fixture(autouse=True)
+def clear_cache():
+    """Clear model cache before every test to prevent mock leakage."""
+    _model_cache.clear()
 
 class TestCosineHelper:
     """Test the _cosine_similarity helper directly."""
@@ -88,11 +93,12 @@ class TestEmbeddingClassifierWithMock:
         from humane_proxy.classifiers.embedding_classifier import EmbeddingClassifier
 
         mock_model = MagicMock()
-        # Anchors: some arbitrary vectors.
         mock_model.encode.side_effect = [
+            np.zeros((1, 3)),       # warmup
             np.random.rand(10, 3),  # self_harm anchors
             np.random.rand(8, 3),   # criminal anchors
-            np.array([[0.0, 0.0, 0.0]]),  # query vector (zero = orthogonal to everything)
+            np.random.rand(8, 3),   # benign anchors
+            np.array([[0.0, 0.0, 0.0]]),  # query vector (orthogonal to everything)
         ]
 
         with patch("humane_proxy.classifiers.embedding_classifier._ML_AVAILABLE", True):

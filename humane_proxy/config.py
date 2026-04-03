@@ -83,6 +83,11 @@ def _apply_env_overrides(config: dict) -> dict:
         "HUMANE_PROXY_STAGE3_TIMEOUT": (["stage3", "timeout"], float),
         "HUMANE_PROXY_STAGE1_CEILING": (["pipeline", "stage1_ceiling"], float),
         "HUMANE_PROXY_STAGE2_CEILING": (["pipeline", "stage2_ceiling"], float),
+        # Phase 3 additions:
+        "HUMANE_PROXY_SELF_HARM_THRESHOLD": (["safety", "categories", "self_harm", "escalate_threshold"], float),
+        "HUMANE_PROXY_STORAGE_BACKEND": (["storage", "backend"], str),
+        "HUMANE_PROXY_REDIS_URL": (["storage", "redis", "url"], str),
+        "HUMANE_PROXY_POSTGRES_DSN": (["storage", "postgres", "dsn"], str),
     }
 
     for env_key, (path, cast) in _ENV_MAP.items():

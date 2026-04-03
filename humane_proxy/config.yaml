@@ -130,6 +130,13 @@ stage2:
   # Cosine similarity threshold: scores below this are "safe".
   safe_threshold: 0.35
 
+  # Ambiguity dampening: when self-harm embedding score falls in this
+  # band, benign anchors are also compared.  If benign semantics are
+  # competitive (within ambiguity_margin), the score is halved.
+  ambiguity_low: 0.30
+  ambiguity_high: 0.55
+  ambiguity_margin: 0.05
+
 stage3:
   # Provider: "auto" | "openai_moderation" | "llamaguard" | "openai_chat" | "none"
   # "auto" checks OPENAI_API_KEY → openai_moderation, then GROQ_API_KEY → llamaguard.
@@ -168,6 +175,11 @@ safety:
       # Always notify the operator when self-harm is detected.
       always_escalate: true
 
+      # Self-harm escalation threshold: embedding/pipeline scores at or above
+      # this value trigger escalation.  Scores below are downgraded to safe.
+      # Set lower for more aggressive catching, higher to reduce false positives.
+      escalate_threshold: 0.5
+
       # "block"   (default / Mode B) — HumaneProxy itself replies with an
       #           empathetic message and international crisis resources.
       # "forward" (Mode A) — forward to the upstream LLM with a care-context
@@ -183,6 +195,26 @@ safety:
 
       # Score threshold for blocking the request entirely.
       block_threshold: 0.80
+
+# ---------------------------------------------------------------------------
+# Storage Backend
+# ---------------------------------------------------------------------------
+
+storage:
+  # "sqlite" (default, zero config) | "redis" | "postgres"
+  backend: "sqlite"
+
+  sqlite:
+    # Path relative to CWD (or absolute).
+    path: "escalations.db"
+
+  redis:
+    url: "redis://localhost:6379/0"
+    key_prefix: "humane_proxy:"
+
+  postgres:
+    dsn: "postgresql://user:pass@localhost:5432/humane_proxy"
+    pool_size: 5
 
 # ---------------------------------------------------------------------------
 # Admin API

@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.3.0] — 2026-04-03
+
+### Added
+
+- **Swappable Storage Backend:** Implemented the Repository Pattern for escalation storage. Now supports `"sqlite"` (default), `"redis"`, and `"postgres"`. Configurable via `storage.backend` in `humane_proxy.yaml` (`[redis]` and `[postgres]` install extras available).
+- **Framework Integrations:** First-class support for LlamaIndex (`get_safety_tools()`), CrewAI (`get_safety_tools()`), and AutoGen (`register_safety_tools()`). Available via respective install extras.
+- **Configurable Self-Harm Threshold:** Added `escalate_threshold` to `self_harm` category config (defaults to `0.5`). Replaces the previous behaviour of unconditionally forcing all self-harm scores to 1.0.
+- **Stage 2 Ambiguity Dampening:** Semantic embedding scores in the "grey zone" (0.30–0.55) for self-harm are now compared against benign anchors (e.g. "no point in continuing this project"). If benign semantics are competitive, the score is halved to prevent false positives.
+- **Enhanced Admin API:** Added `/admin/health` (no auth), `/admin/config` (sanitised config view), and `/admin/escalations/export` (CSV export). Enhanced `/admin/stats` with `top_sessions`, `by_stage`, and `hourly_last_24h` breakdowns. Added date filtering and sorting to `/admin/escalations`.
+- **Container Files:** Added  `Dockerfile` and `.dockerignore` to allow building Docker image with ~500KB context size.
+
+### Changed
+
+- **Stage 2 Model Caching:** The sentence-transformer model is now a process-level singleton. `humane-proxy check` no longer reads the 80MB model from disk on every call. Added a warm-up encode step to eliminate lazy-init latency.
+- FastMCP constructor gracefully removes `description` kwarg to support `fastmcp>=0.4.0`.
+
+---
+
 ## [0.2.3] — 2026-04-01
 
 ### Fixed

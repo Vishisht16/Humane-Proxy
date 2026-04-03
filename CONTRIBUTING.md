@@ -70,6 +70,8 @@ Tests live in the `tests/` directory. We use **pytest** with **pytest-asyncio** 
 | Webhooks | `test_webhooks.py` / `test_enhanced_webhooks.py` |
 | Interceptor (FastAPI middleware) | `test_interceptor.py` |
 | Trajectory / risk analysis | `test_trajectory.py` |
+| Storage backends (SQLite, Redis, PG) | `test_storage_backends.py` |
+| Framework Integrations (LlamaIndex, CrewAI, AutoGen) | `test_integrations_smoke.py` |
 
 ### Example: adding a heuristic test
 

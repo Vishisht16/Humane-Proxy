@@ -326,7 +326,7 @@ class SafetyPipeline:
         session_id: str,
         text: str,
     ) -> PipelineResult:
-        """Apply trajectory, self-harm override, and escalation logic."""
+        """Apply trajectory, self-harm threshold, and escalation logic."""
         from humane_proxy.risk.trajectory import analyze
 
         # Trajectory analysis.
@@ -337,9 +337,20 @@ class SafetyPipeline:
             result.score = min(result.score + self.spike_boost, 1.0)
             result.triggers.append("trajectory_spike")
 
-        # Self-harm critical override.
+        # Self-harm threshold-aware override.
+        self_harm_cfg = self._config.get("safety", {}).get("categories", {}).get("self_harm", {})
+        self_harm_threshold = self_harm_cfg.get("escalate_threshold", 0.5)
+
         if result.category == "self_harm":
-            result.score = 1.0
+            if result.score >= self_harm_threshold:
+                # Definitive self-harm — force to 1.0.
+                result.score = 1.0
+            else:
+                # Below threshold — downgrade to safe for transparency.
+                result.triggers.append(
+                    f"self_harm_below_threshold:{result.score:.3f}<{self_harm_threshold}"
+                )
+                result.category = "safe"
 
         result.score = min(result.score, 1.0)
 
