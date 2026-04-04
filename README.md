@@ -25,7 +25,7 @@ User message → HumaneProxy → (safe?) → Upstream LLM → Response
               Empathetic care response  +  Operator alert
 ```
 
-- 🆘 **Self-harm detected** → Blocked with international crisis resources. Operator notified.
+- 🆘 **Self-harm detected** → Blocked with international crisis resources for 20+ countries. Operator notified.
 - ⚠️ **Criminal intent detected** → Blocked or flagged. Operator notified.
 - ✅ **Safe** → Forwarded to your LLM transparently.
 
@@ -184,7 +184,7 @@ When self-harm is detected, HumaneProxy can respond in two ways:
 
 ### Mode B — Block (default)
 
-HumaneProxy returns an empathetic message with crisis resources for 10+ countries directly to the user. Your LLM is never involved.
+HumaneProxy returns an empathetic message with crisis resources for 20+ countries directly to the user. Your LLM is never involved.
 
 ```yaml
 safety:
@@ -201,7 +201,7 @@ safety:
 ```
 
 Built-in crisis resources include:
-🇺🇸 US (988) · 🇮🇳 India (iCall, Vandrevala) · 🇬🇧 UK (Samaritans) · 🇦🇺 AU (Lifeline) · 🇨🇦 CA · 🇩🇪 DE · 🇫🇷 FR · 🇧🇷 BR · 🇿🇦 ZA · 🌐 IASP + Befrienders
+🇺🇸 US (988) · 🇮🇳 India (iCall, Vandrevala) · 🇬🇧 UK (Samaritans) · 🇦🇺 AU (Lifeline) · 🇨🇦 CA · 🇩🇪 DE · 🇫🇷 FR · 🇧🇷 BR · 🇿🇦 ZA · 🇯🇵 JP · 🇰🇷 KR · 🇮🇹 IT · 🇪🇸 ES · 🇲🇽 MX · 🇳🇿 NZ · 🇮🇪 IE · 🇵🇭 PH · 🇳🇬 NG · 🇦🇷 AR · 🌐 IASP + Befrienders
 
 ### Mode A — Forward with care context
 

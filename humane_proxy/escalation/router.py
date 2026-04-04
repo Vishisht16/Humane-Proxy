@@ -53,6 +53,37 @@ Please reach out to a crisis service near you:
 🇿🇦 South Africa
   • SADAG: 0800 567 567
 
+🇯🇵 Japan
+  • TELL Japan: 03-5774-0992 (English/Japanese)
+  • Yorisoi Hotline: 0120-279-338
+
+🇰🇷 South Korea
+  • Suicide Prevention Hotline: 1393
+
+🇮🇹 Italy
+  • Telefono Amico: 02 2327 2327
+
+🇪🇸 Spain
+  • Línea 024: 024 (free, 24/7)
+
+🇲🇽 Mexico
+  • Línea de la Vida: 800 911 2000
+
+🇳🇿 New Zealand
+  • Need to Talk?: 1737 (Call or text)
+
+🇮🇪 Ireland
+  • Samaritans: 116 123
+
+🇵🇭 Philippines
+  • Hopeline PH: 02-8804-4673 or 2919 (Toll-free for Globe/TM)
+
+🇳🇬 Nigeria
+  • MANI: 0806 210 6340
+
+🇦🇷 Argentina
+  • Casistencia al Suicida: 0800 345 1435
+
 🌐 International:
   • IASP Crisis Centres: https://www.iasp.info/resources/Crisis_Centres/
   • Befrienders Worldwide: https://www.befrienders.org

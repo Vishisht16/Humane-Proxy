@@ -41,6 +41,12 @@ class TestCareResponseBlock:
     def test_message_contains_emergency_guidance(self):
         assert "emergency" in CARE_RESPONSE_BLOCK.lower()
 
+    def test_message_contains_new_countries(self):
+        assert "Japan" in CARE_RESPONSE_BLOCK
+        assert "South Korea" in CARE_RESPONSE_BLOCK
+        assert "Spain" in CARE_RESPONSE_BLOCK
+        assert "Mexico" in CARE_RESPONSE_BLOCK
+
 
 class TestCareResponseForward:
     """Forward mode injects care context into the LLM payload."""

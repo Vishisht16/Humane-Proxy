@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.0] - 2026-04-04
+
+### Added
+
+- **Expanded International Crisis Coverage:** Added verified crisis helpline numbers for 10 additional countries: Japan, South Korea, Italy, Spain, Mexico, New Zealand, Ireland, Philippines, Nigeria, and Argentina. Total coverage now includes 20+ countries and international resources.
+
+---
+
 ## [0.3.1] - 2026-04-03
 
 ### Fixed
