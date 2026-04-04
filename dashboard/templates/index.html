@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HumaneProxy | Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style type="text/tailwindcss">
+        @layer base {
+            body {
+                @apply bg-gray-950 text-gray-100 font-sans;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="border-b border-gray-800 bg-gray-900/50 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center gap-3">
+                    <span class="text-2xl">🛡️</span>
+                    <span class="font-bold text-xl tracking-tight">HumaneProxy <span class="text-gray-500 font-medium">/ Admin</span></span>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2 px-3 py-1 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full text-xs font-medium">
+                        <span class="relative flex h-2 w-2">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                        </span>
+                        System Online
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Metric Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-gray-700 transition-colors">
+                <p class="text-gray-400 text-sm font-medium mb-1">Total Messages Scanned</p>
+                <h3 class="text-3xl font-bold">124,582</h3>
+                <p class="text-xs text-gray-500 mt-2">↑ 12% from last hour</p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-gray-700 transition-colors">
+                <p class="text-gray-400 text-sm font-medium mb-1">Escalations Today</p>
+                <h3 class="text-3xl font-bold text-red-500">42</h3>
+                <p class="text-xs text-gray-500 mt-2">3 critical self-harm events</p>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 hover:border-gray-700 transition-colors">
+                <p class="text-gray-400 text-sm font-medium mb-1">Active Sessions</p>
+                <h3 class="text-3xl font-bold">1,204</h3>
+                <p class="text-xs text-gray-500 mt-2">Currently being monitored</p>
+            </div>
+        </div>
+
+        <!-- Escalations Table -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
+                <h2 class="font-semibold text-lg">Recent Escalations</h2>
+                <button class="text-xs font-medium px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors border border-gray-700">Export CSV</button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="bg-gray-950/50 text-gray-400 text-xs uppercase tracking-wider">
+                            <th class="px-6 py-3 font-semibold">Timestamp</th>
+                            <th class="px-6 py-3 font-semibold">Session ID</th>
+                            <th class="px-6 py-3 font-semibold">Category</th>
+                            <th class="px-6 py-3 font-semibold">Risk Score</th>
+                            <th class="px-6 py-3 font-semibold">Triggers</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-800 text-sm">
+                        <tr class="hover:bg-gray-800/30 transition-colors">
+                            <td class="px-6 py-4 text-gray-400">2026-04-04 08:12:45</td>
+                            <td class="px-6 py-4 font-mono">sess_9a2f1b</td>
+                            <td class="px-6 py-4">
+                                <span class="px-2 py-0.5 rounded bg-red-500/10 text-red-500 border border-red-500/20 text-xs">self_harm</span>
+                            </td>
+                            <td class="px-6 py-4 font-bold text-red-400">0.95</td>
+                            <td class="px-6 py-4 text-gray-400 italic truncate max-w-xs">keyword:suicide, intent_pattern:method_seeking</td>
+                        </tr>
+                        <tr class="hover:bg-gray-800/30 transition-colors">
+                            <td class="px-6 py-4 text-gray-400">2026-04-04 08:05:12</td>
+                            <td class="px-6 py-4 font-mono">sess_3c5e82</td>
+                            <td class="px-6 py-4">
+                                <span class="px-2 py-0.5 rounded bg-orange-500/10 text-orange-500 border border-orange-500/20 text-xs">criminal_intent</span>
+                            </td>
+                            <td class="px-6 py-4 font-bold text-orange-400">0.82</td>
+                            <td class="px-6 py-4 text-gray-400 italic truncate max-w-xs">keyword:bomb, intent_pattern:recipe</td>
+                        </tr>
+                        <tr class="hover:bg-gray-800/30 transition-colors">
+                            <td class="px-6 py-4 text-gray-400">2026-04-04 07:58:33</td>
+                            <td class="px-6 py-4 font-mono">sess_7d1a94</td>
+                            <td class="px-6 py-4">
+                                <span class="px-2 py-0.5 rounded bg-red-500/10 text-red-500 border border-red-500/20 text-xs">self_harm</span>
+                            </td>
+                            <td class="px-6 py-4 font-bold text-red-400">0.88</td>
+                            <td class="px-6 py-4 text-gray-400 italic truncate max-w-xs">embedding:high_risk, trajectory:spike</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-800 bg-gray-950/20 flex justify-center">
+                <button class="text-xs text-gray-500 hover:text-gray-300 transition-colors">View all escalations →</button>
+            </div>
+        </div>
+    </main>
+</body>
+</html>
