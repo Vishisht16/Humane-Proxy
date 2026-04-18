@@ -349,26 +349,59 @@ storage:
 
 ## CLI Reference
 
+All commands are available via both `humane-proxy` and the shorthand `hp`.
+
 ```bash
 # Safety check
-humane-proxy check "I want to end my life"
+hp check "I want to end my life"
 # 🆘 FLAGGED — self_harm
 # Score   : 1.0
 # Category: self_harm
 
+# Run benchmark evaluation
+hp benchmark --dataset evals/sample.json
+hp benchmark --dataset evals/sample.json --ci  # exit code 1 on failure
+
 # List recent escalations
-humane-proxy escalations
-humane-proxy escalations --category self_harm --limit 50
+hp escalations
+hp escalations --category self_harm --limit 50
 
 # Session risk history
-humane-proxy session user-42
+hp session user-42
 
 # Start proxy server
-humane-proxy start [--host 0.0.0.0] [--port 8000]
+hp start [--host 0.0.0.0] [--port 8000]
 
 # MCP server (requires [mcp] extra)
-humane-proxy mcp-serve
+hp mcp-serve
 ```
+
+---
+
+## GitHub Action — CI/CD Safety Gate
+
+Use HumaneProxy as a GitHub Action to enforce safety coverage in your CI pipeline. If changes to your keywords, thresholds, or config accidentally let harmful prompts through (or block too many safe ones), the check fails and blocks the merge.
+
+```yaml
+# .github/workflows/safety-benchmark.yml
+name: Safety Benchmark
+on: [push, pull_request]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Vishisht16/Humane-Proxy@v0.4.0
+        with:
+          dataset: evals/sample.json
+```
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `dataset` | ✅ | — | Path to JSON evaluation dataset |
+| `python-version` | ❌ | `3.12` | Python version to use |
+| `extra` | ❌ | `""` | pip extras (e.g., `ml` for Stage 2 embeddings) |
 
 ---
 
@@ -530,6 +563,15 @@ privacy:
 | `autogen` | `pip install humane-proxy[autogen]` | AutoGen native integration (`autogen-agentchat`) |
 | `langchain` | `pip install humane-proxy[langchain]` | LangChain adapter (MCP + `langchain-mcp-adapters`) |
 | `all` | `pip install humane-proxy[all]` | Includes ALL optional dependencies above |
+
+---
+
+## Compliance & Security
+
+HumaneProxy is designed for deployment in regulated environments. See our compliance documentation for details:
+
+- **[COMPLIANCE.md](COMPLIANCE.md)** — HIPAA, GDPR, and SOC 2 readiness assessment
+- **[SECURITY.md](.github/SECURITY.md)** — Vulnerability disclosure policy
 
 ---
 

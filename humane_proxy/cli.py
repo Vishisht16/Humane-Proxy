@@ -2,10 +2,16 @@
 
 Install the package and run::
 
-    humane-proxy init      # scaffold config + .env in your project
-    humane-proxy start     # start the proxy server
+    humane-proxy init          # scaffold config + .env in your project
+    humane-proxy start         # start the proxy server
     humane-proxy check "text"  # quick safety check from terminal
-    humane-proxy version   # print version info
+    humane-proxy benchmark     # run evaluation dataset through the pipeline
+    humane-proxy version       # print version info
+
+The ``hp`` alias is also available::
+
+    hp check "text"
+    hp benchmark --dataset evals/sample.json
 """
 
 from __future__ import annotations
@@ -325,6 +331,224 @@ def session(session_id: str) -> None:
             click.echo(f"     triggers: {', '.join(trigs[:3])}")
 
     click.echo("")
+
+
+@main.command()
+@click.option("--dataset", "-d", required=True,
+              type=click.Path(exists=True),
+              help="Path to JSON evaluation dataset.")
+@click.option("--ci", is_flag=True, default=False,
+              help="CI mode: exit with code 1 if any test case fails.")
+@click.option("--stages", default="1,2",
+              help="Comma-separated pipeline stages to run. Default: '1,2'")
+def benchmark(dataset: str, ci: bool, stages: str) -> None:
+    """Run an evaluation dataset through the safety pipeline and report results.
+
+    The dataset must be a JSON file containing an array of objects, each with
+    'message' (str) and 'expected' (str: safe | self_harm | criminal_intent).
+
+    Example::
+
+        hp benchmark --dataset evals/sample.json
+        hp benchmark --dataset evals/sample.json --ci
+    """
+    import asyncio
+    import json
+    import time
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        from rich.panel import Panel
+        from rich.text import Text
+        _RICH = True
+    except ImportError:
+        _RICH = False
+
+    # --- Load dataset ---
+    with open(dataset, "r", encoding="utf-8") as f:
+        cases = json.load(f)
+
+    if not isinstance(cases, list) or not cases:
+        click.echo("  [ERROR] Dataset must be a non-empty JSON array.")
+        sys.exit(1)
+
+    for i, case in enumerate(cases):
+        if "message" not in case or "expected" not in case:
+            click.echo(f"  [ERROR] Entry {i} missing 'message' or 'expected' field.")
+            sys.exit(1)
+
+    click.echo(_BANNER)
+    click.echo(f"  [*] Benchmark: {dataset}")
+    click.echo(f"  [*] Test cases: {len(cases)}\n")
+
+    # --- Run pipeline ---
+    import os
+    os.environ["HUMANE_PROXY_ENABLED_STAGES"] = stages
+    
+    from humane_proxy import HumaneProxy
+    proxy = HumaneProxy()
+
+    results = []
+
+    async def _run_all():
+        for i, case in enumerate(cases):
+            msg = case["message"]
+            expected = case["expected"]
+            t0 = time.perf_counter()
+            result = await proxy.check_async(msg, session_id=f"bench-{i}")
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+            actual = result.get("category", "safe")
+            # Treat safe=True results as "safe" regardless of category field
+            if result.get("safe", True) and actual == "safe":
+                actual = "safe"
+            elif result.get("safe", True):
+                actual = "safe"
+
+            passed = actual == expected
+            results.append({
+                "message": msg,
+                "expected": expected,
+                "actual": actual,
+                "passed": passed,
+                "score": result.get("score", 0.0),
+                "latency_ms": elapsed_ms,
+            })
+
+    asyncio.run(_run_all())
+
+    # --- Compute metrics ---
+    categories = ["safe", "self_harm", "criminal_intent"]
+    total = len(results)
+    passed_count = sum(1 for r in results if r["passed"])
+    failed_count = total - passed_count
+
+    latencies = [r["latency_ms"] for r in results]
+    avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
+    min_latency = min(latencies) if latencies else 0.0
+    max_latency = max(latencies) if latencies else 0.0
+
+    # Per-category precision/recall/F1
+    cat_metrics = {}
+    for cat in categories:
+        tp = sum(1 for r in results if r["expected"] == cat and r["actual"] == cat)
+        fp = sum(1 for r in results if r["expected"] != cat and r["actual"] == cat)
+        fn = sum(1 for r in results if r["expected"] == cat and r["actual"] != cat)
+        tn = sum(1 for r in results if r["expected"] != cat and r["actual"] != cat)
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+
+        cat_metrics[cat] = {
+            "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+            "precision": precision, "recall": recall, "f1": f1,
+        }
+
+    accuracy = passed_count / total if total > 0 else 0.0
+
+    # --- Display results ---
+    if _RICH:
+        import io
+        # Force UTF-8 output to avoid Windows cp1252 encoding errors
+        utf8_stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        console = Console(file=utf8_stdout)
+
+        # Individual results table
+        detail_table = Table(title="Test Results", show_lines=True)
+        detail_table.add_column("#", style="dim", width=4)
+        detail_table.add_column("Message", max_width=50)
+        detail_table.add_column("Expected", style="cyan")
+        detail_table.add_column("Actual", style="cyan")
+        detail_table.add_column("Score", justify="right")
+        detail_table.add_column("Latency", justify="right")
+        detail_table.add_column("Result", justify="center")
+
+        for i, r in enumerate(results):
+            result_text = Text("PASS", style="green bold") if r["passed"] else Text("FAIL", style="red bold")
+            actual_style = "green" if r["passed"] else "red bold"
+            detail_table.add_row(
+                str(i + 1),
+                r["message"][:50],
+                r["expected"],
+                Text(r["actual"], style=actual_style),
+                f"{r['score']:.2f}",
+                f"{r['latency_ms']:.1f}ms",
+                result_text,
+            )
+
+        console.print(detail_table)
+        console.print()
+
+        # Per-category metrics table
+        metrics_table = Table(title="Per-Category Metrics")
+        metrics_table.add_column("Category", style="cyan bold")
+        metrics_table.add_column("TP", justify="right")
+        metrics_table.add_column("FP", justify="right")
+        metrics_table.add_column("FN", justify="right")
+        metrics_table.add_column("Precision", justify="right")
+        metrics_table.add_column("Recall", justify="right")
+        metrics_table.add_column("F1", justify="right")
+
+        for cat in categories:
+            m = cat_metrics[cat]
+            metrics_table.add_row(
+                cat,
+                str(m["tp"]),
+                str(m["fp"]),
+                str(m["fn"]),
+                f"{m['precision']:.1%}",
+                f"{m['recall']:.1%}",
+                f"{m['f1']:.1%}",
+            )
+
+        console.print(metrics_table)
+        console.print()
+
+        # Summary panel
+        acc_style = "green bold" if accuracy >= 0.9 else ("yellow bold" if accuracy >= 0.7 else "red bold")
+        summary_text = Text()
+        summary_text.append(f"Accuracy: {accuracy:.1%}", style=acc_style)
+        summary_text.append(f"  |  Passed: {passed_count}/{total}")
+        summary_text.append(f"  |  Failed: {failed_count}")
+        summary_text.append(f"\nLatency — avg: {avg_latency:.1f}ms  min: {min_latency:.1f}ms  max: {max_latency:.1f}ms")
+
+        panel_style = "green" if failed_count == 0 else "red"
+        console.print(Panel(summary_text, title="Benchmark Summary", border_style=panel_style))
+
+    else:
+        # Fallback plain text output
+        click.echo("  Results:")
+        click.echo(f"  {'#':<4} {'Expected':<18} {'Actual':<18} {'Score':<8} {'Latency':<10} {'Result'}")
+        click.echo("  " + "-" * 80)
+        for i, r in enumerate(results):
+            status = "PASS" if r["passed"] else "FAIL"
+            click.echo(
+                f"  {i+1:<4} {r['expected']:<18} {r['actual']:<18} "
+                f"{r['score']:<8.2f} {r['latency_ms']:<10.1f} {status}"
+            )
+
+        click.echo(f"\n  Accuracy: {accuracy:.1%} ({passed_count}/{total})")
+        click.echo(f"  Latency — avg: {avg_latency:.1f}ms  min: {min_latency:.1f}ms  max: {max_latency:.1f}ms")
+
+        for cat in categories:
+            m = cat_metrics[cat]
+            click.echo(
+                f"  {cat}: precision={m['precision']:.1%} recall={m['recall']:.1%} f1={m['f1']:.1%} "
+                f"(TP={m['tp']} FP={m['fp']} FN={m['fn']})"
+            )
+
+    click.echo("")
+
+    if ci and failed_count > 0:
+        click.echo(f"  [FAIL] CI mode: {failed_count} test case(s) failed. Exiting with code 1.")
+        sys.exit(1)
+
+    if failed_count == 0:
+        click.echo("  [PASS] All test cases passed!")
+    else:
+        click.echo(f"  [WARN] {failed_count} test case(s) failed.")
 
 
 @main.command("mcp-serve")

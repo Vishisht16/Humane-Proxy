@@ -1,0 +1,41 @@
+name: "HumaneProxy Safety Benchmark"
+description: "Run your AI safety evaluation dataset through HumaneProxy's 3-stage pipeline. Catch regressions in safety coverage before they reach production."
+author: "Vishisht16"
+
+branding:
+  icon: "shield"
+  color: "green"
+
+inputs:
+  dataset:
+    description: "Path to a JSON evaluation dataset. Each entry needs 'message' and 'expected' (safe | self_harm | criminal_intent)."
+    required: true
+  python-version:
+    description: "Python version to use."
+    required: false
+    default: "3.12"
+  extra:
+    description: "pip install extras (e.g. 'ml' for Stage 2 embeddings). Comma-separated."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install HumaneProxy
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.extra }}" ]; then
+          pip install --quiet "humane-proxy[${{ inputs.extra }}]"
+        else
+          pip install --quiet humane-proxy
+        fi
+
+    - name: Run safety benchmark
+      shell: bash
+      run: hp benchmark --dataset "${{ inputs.dataset }}" --ci

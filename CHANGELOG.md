@@ -6,6 +6,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.0] - 2026-04-18
+
+### Added
+
+- **`hp benchmark` CLI command** — run evaluation datasets through the safety pipeline with per-category precision, recall, F1, confusion matrix, and latency stats. Supports `--ci` flag for CI/CD exit-code gating. Uses `rich` for beautiful terminal rendering.
+- **GitHub Action** (`action.yml`) — `uses: Vishisht16/Humane-Proxy@v0.4.0` — run safety benchmarks in CI pipelines to catch regressions before production.
+- **`hp` CLI alias** — all commands now available via `hp` shorthand (e.g., `hp check`, `hp benchmark`, `hp start`).
+- **Sample evaluation dataset** (`evals/sample.json`) — 20 test cases: 5 self-harm, 5 criminal intent, 10 safe (including false-positive bait like "kill a process" and "dying of laughter").
+- `COMPLIANCE.md` — HIPAA, GDPR, and SOC 2 readiness assessment with operator responsibilities.
+- `.github/SECURITY.md` — vulnerability disclosure policy with supported versions and coordinated disclosure window.
+- `LAUNCHGUIDE.md` for MCP Marketplace extended "About" section with full pipeline docs, MCP tool reference, and setup guides.
+- `.github/FUNDING.yml` with GitHub Sponsors and Ko-fi links.
+- `.github/CODEOWNERS` locking architecture and config files to maintainer review.
+- AI Automation Policy and anti-spam rules in `CONTRIBUTING.md`.
+- Contributor License Agreement (CLA) notice in `CONTRIBUTING.md`.
+- "Available On" section in README with Glama AAA rating and MCP Marketplace links.
+- "As an MCP Server" quick start section in README.
+- MCP Marketplace badge in README.
+
+### Fixed
+
+- FastAPI dependency bumped to `>=0.109.1` to patch Content-Type Header ReDoS vulnerability (GHSA-qf9m-vfgh-m389).
+- `server.json` env vars now include `"required": false` for cross-marketplace parser compatibility.
+
+### Security
+
+- Branch protection rules documented and recommended for `main`.
+- CODEOWNERS prevents unauthorized modification of `pyproject.toml`, `CHANGELOG.md`, `Dockerfile`, and pipeline code.
+- Honeypot mechanism in CONTRIBUTING.md to identify unsupervised AI agent PRs.
+
+### Dependencies
+
+- Added `rich>=13.0.0` as a core dependency for CLI benchmark rendering.
+
+---
+
 ## [0.3.1] - 2026-04-03
 
 ### Fixed
