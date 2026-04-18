@@ -26,7 +26,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "fastapi>=0.100.0",
+    "fastapi>=0.109.1",
     "httpx>=0.24.0",
     "numpy>=1.24.0",
     "pyyaml>=6.0",

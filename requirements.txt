@@ -1,5 +1,5 @@
 # Core runtime dependencies
-fastapi>=0.100.0
+fastapi>=0.109.1
 httpx>=0.24.0
 pyyaml>=6.0
 uvicorn>=0.22.0

@@ -23,12 +23,14 @@
         {
           "name": "OPENAI_API_KEY",
           "description": "OpenAI API key for Stage 3 reasoning (optional)",
+          "required": false,
           "isRequired": false,
           "isSecret": true
         },
         {
           "name": "GROQ_API_KEY",
           "description": "Groq API key for LlamaGuard Stage 3 (optional)",
+          "required": false,
           "isRequired": false,
           "isSecret": true
         }
