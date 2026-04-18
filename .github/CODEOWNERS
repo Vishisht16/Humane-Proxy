@@ -1,0 +1,25 @@
+# ============================================================
+# HumaneProxy — Code Ownership Rules
+# ============================================================
+# Requires "Require review from code owners" in branch protection.
+
+# Global fallback — Vishisht16 owns everything by default
+*                                   @Vishisht16
+
+# --- Architecture & Config (STRICTLY locked) -----------------
+/pyproject.toml                     @Vishisht16
+/server.json                        @Vishisht16
+/glama.json                         @Vishisht16
+/Dockerfile                         @Vishisht16
+/CHANGELOG.md                       @Vishisht16
+/humane_proxy.yaml                  @Vishisht16
+/.github/                           @Vishisht16
+
+# --- Core pipeline (critical safety logic) -------------------
+/humane_proxy/classifiers/          @Vishisht16
+/humane_proxy/risk/                 @Vishisht16
+/humane_proxy/config.py             @Vishisht16
+/humane_proxy/config.yaml           @Vishisht16
+/humane_proxy/mcp_server.py         @Vishisht16
+/humane_proxy/cli.py                @Vishisht16
+/humane_proxy/middleware/           @Vishisht16

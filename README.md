@@ -11,7 +11,7 @@ HumaneProxy sits between your users and any LLM. When someone expresses self-har
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Tests](https://github.com/Vishisht16/Humane-Proxy/actions/workflows/tests.yaml/badge.svg)](https://github.com/Vishisht16/Humane-Proxy/actions/workflows/tests.yaml)
 [![Humane-Proxy MCP server](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy/badges/score.svg)](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy)
-[![Humane-Proxy MCP server](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy/badges/card.svg)](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy)
+[![MCP Marketplace](https://img.shields.io/badge/MCP_Marketplace-Available-brightgreen)](https://mcp-marketplace.io/server/io-github-vishisht16-humane-proxy)
 
 ---
 
@@ -63,6 +63,40 @@ result = proxy.check("I want to end my life", session_id="user-42")
 result = await proxy.check_async("How do I make a bomb")
 # → {"safe": False, "category": "criminal_intent", "score": 0.9, ...}
 ```
+
+### As an MCP Server
+
+```bash
+pip install humane-proxy[mcp]
+
+# Start the MCP server (stdio transport — for Claude Desktop, Cursor, etc.)
+humane-proxy mcp-serve
+```
+
+Or add it directly to your Claude Desktop config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "humane-proxy": {
+      "command": "uvx",
+      "args": ["--from", "humane-proxy[mcp]", "humane-proxy", "mcp-serve"]
+    }
+  }
+}
+```
+
+This exposes 3 tools to your AI agent: `check_message_safety`, `get_session_risk`, and `list_recent_escalations`.
+
+---
+
+## Available On
+
+| Platform | Link | Status |
+|---|---|---|
+| **PyPI** | [humane-proxy](https://pypi.org/project/humane-proxy/) | ![PyPI](https://img.shields.io/pypi/v/humane-proxy.svg) |
+| **Glama MCP Registry** | [Humane-Proxy](https://glama.ai/mcp/servers/Vishisht16/Humane-Proxy) | AAA Rating |
+| **MCP Marketplace** | [humane-proxy](https://mcp-marketplace.io/server/io-github-vishisht16-humane-proxy) | Low Risk 9.0 |
 
 ---
 
