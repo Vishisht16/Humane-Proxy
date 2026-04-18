@@ -1,5 +1,5 @@
 name: "HumaneProxy Safety Benchmark"
-description: "Run your AI safety evaluation dataset through HumaneProxy's 3-stage pipeline. Catch regressions in safety coverage before they reach production."
+description: "Run AI safety evaluations through HumaneProxy's pipeline to catch prompt regressions before production."
 author: "Vishisht16"
 
 branding:
