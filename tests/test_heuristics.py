@@ -1,5 +1,8 @@
 """Tests for humane_proxy.classifiers.heuristics."""
 
+import pytest
+
+import humane_proxy.classifiers.heuristics as heuristics
 from humane_proxy.classifiers.heuristics import classify
 
 
@@ -228,3 +231,63 @@ class TestNormalization:
     def test_case_insensitive(self):
         cat, _, _ = classify("SUICIDE")
         assert cat == "self_harm"
+
+
+class TestUnicodeAndEvasion:
+    def test_non_breaking_space_self_harm(self):
+        cat, score, _ = classify("I want\u00a0to\u00a0die")
+        assert cat == "self_harm"
+        assert score == 1.0
+
+    def test_thin_space_self_harm(self):
+        cat, score, _ = classify("I want\u2009to\u2009die")
+        assert cat == "self_harm"
+        assert score == 1.0
+
+    def test_leetspeak_self_harm_not_matched(self):
+        cat, score, triggers = classify("I want to k1ll mys3lf")
+        assert cat == "safe"
+        assert score == 0.0
+        assert triggers == []
+
+    def test_cyrillic_homoglyph_suicide_not_matched(self):
+        cat, score, triggers = classify("su\u0456cide")
+        assert cat == "safe"
+        assert score == 0.0
+        assert triggers == []
+
+    def test_punctuated_letters_bomb_not_matched(self):
+        cat, score, triggers = classify("how to make a b.o.m.b")
+        assert cat == "safe"
+        assert score == 0.0
+        assert triggers == []
+
+    def test_trailing_punctuation_bomb_matches(self):
+        cat, score, _ = classify("how to make a bomb!!!")
+        assert cat == "criminal_intent"
+        assert score > 0.0
+
+    def test_tab_whitespace_bomb_matches(self):
+        cat, score, _ = classify("how\tto\tmake\ta\tbomb")
+        assert cat == "criminal_intent"
+        assert score > 0.0
+
+    def test_mixed_language_bomb_not_matched(self):
+        cat, score, triggers = classify("how to hacer una bomba")
+        assert cat == "safe"
+        assert score == 0.0
+        assert triggers == []
+
+
+class TestBoundaryScoring:
+    def test_score_just_below_half(self, monkeypatch):
+        monkeypatch.setattr(heuristics, "_CRIMINAL_KEYWORD_SCORE", 0.49)
+        cat, score, _ = classify("child pornography")
+        assert cat == "criminal_intent"
+        assert score == pytest.approx(0.49)
+
+    def test_score_at_half(self, monkeypatch):
+        monkeypatch.setattr(heuristics, "_CRIMINAL_KEYWORD_SCORE", 0.50)
+        cat, score, _ = classify("child pornography")
+        assert cat == "criminal_intent"
+        assert score == pytest.approx(0.50)
