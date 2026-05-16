@@ -297,29 +297,29 @@ class SafetyPipeline:
                 final = self._finalize(result, session_id, text)
 
                 self._set_attr(
-                    stage1_span,
+                    span,
                     "humane_proxy.category",
                     final.classification.category,
                 )
                 self._set_attr(
-                    stage1_span,
+                    span,
                     "humane_proxy.score",
                     final.classification.score,
                 )
                 self._set_attr(
-                    stage1_span,
+                    span,
                     "humane_proxy.triggers_count",
                     len(final.classification.triggers),
                 )
                 self._set_attr(
-                    stage1_span,
+                    span,
                     "humane_proxy.stage_reached",
                     final.classification.stage,
                 )
 
                 if final.message_hash:
                     self._set_attr(
-                        stage1_span,
+                        span,
                         "humane_proxy.message_hash",
                         final.message_hash,
                     )

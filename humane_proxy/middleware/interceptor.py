@@ -99,6 +99,7 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
+REQUEST_COUNT = 0
 @app.middleware("http")
 async def add_request_context(request: Request, call_next):
     request_id = str(uuid.uuid4())
@@ -110,8 +111,10 @@ async def add_request_context(request: Request, call_next):
 
     tracer = _get_tracer()
 
-    span_ctx = tracer.start_as_current_span(
-        "humane_proxy.http.request"
+    span_ctx = (
+        tracer.start_as_current_span("humane_proxy.http.request")
+        if tracer is not None
+        else nullcontext()
     )
     
     with span_ctx as span:
