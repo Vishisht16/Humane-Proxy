@@ -97,6 +97,7 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
+_REQUEST_COUNT = 0
 @app.middleware("http")
 async def add_request_context(request: Request, call_next):
     request_id = str(uuid.uuid4())
