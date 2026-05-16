@@ -14,8 +14,9 @@ from humane_proxy.storage.base import EscalationStore
 
 logger = logging.getLogger("humane_proxy.storage.sqlite")
 
-_LEGACY_DB_PATH: str = str(Path(__file__).resolve().parent.parent / "escalation" / "escalations.db")
-
+_DEFAULT_DB_PATH: str = str(
+    Path(__file__).resolve().parent.parent / "escalation" / "escalations.db"
+)
 
 class SQLiteStore(EscalationStore):
     """SQLite-backed escalation storage.
@@ -43,7 +44,7 @@ class SQLiteStore(EscalationStore):
         elif sqlite_cfg.get("path"):
             self._db_path = sqlite_cfg["path"]
         else:
-            self._db_path = _LEGACY_DB_PATH
+            self._db_path = _DEFAULT_DB_PATH
         self._rate_limit_max = rate_limit_max
         self._rate_limit_window = timedelta(hours=rate_limit_window_hours)
 
