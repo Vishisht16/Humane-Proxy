@@ -7,7 +7,7 @@ import os
 import uuid
 import time
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from typing import Any
 
 import httpx
@@ -25,8 +25,6 @@ except ImportError:
     trace = None
     Status = None
     StatusCode = None
-
-from contextlib import nullcontext
 
 from humane_proxy.config import get_config
 from humane_proxy.telemetry import setup_telemetry, shutdown_telemetry
@@ -99,7 +97,7 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
-REQUEST_COUNT = 0
+_REQUEST_COUNT = 0
 @app.middleware("http")
 async def add_request_context(request: Request, call_next):
     request_id = str(uuid.uuid4())
