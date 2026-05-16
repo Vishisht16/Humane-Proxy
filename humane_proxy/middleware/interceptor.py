@@ -97,7 +97,6 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
-_REQUEST_COUNT = 0
 @app.middleware("http")
 async def add_request_context(request: Request, call_next):
     request_id = str(uuid.uuid4())
@@ -105,6 +104,7 @@ async def add_request_context(request: Request, call_next):
 
     global _REQUEST_COUNT
     _REQUEST_COUNT += 1
+
     start = time.perf_counter()
 
     tracer = _get_tracer()
@@ -114,13 +114,13 @@ async def add_request_context(request: Request, call_next):
         if tracer is not None
         else nullcontext()
     )
-    
+
     with span_ctx as span:
 
         try:
             response = await call_next(request)
 
-            if Status and StatusCode:
+            if span is not None and Status and StatusCode:
                 span.set_status(Status(StatusCode.OK))
 
         except Exception as exc:
@@ -137,7 +137,7 @@ async def add_request_context(request: Request, call_next):
 
             raise
 
-        elapsed_ms = (time.perf_counter() - start) * 1000
+    elapsed_ms = (time.perf_counter() - start) * 1000
 
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Process-Time-MS"] = f"{elapsed_ms:.2f}"
