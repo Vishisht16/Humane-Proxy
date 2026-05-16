@@ -23,7 +23,16 @@ except ImportError:
 # MCP app instance
 # ---------------------------------------------------------------------------
 
+def _init_telemetry() -> None:
+    """Initialize OpenTelemetry for MCP server execution."""
+    from humane_proxy.config import get_config
+    from humane_proxy.telemetry import setup_telemetry
+
+    config = get_config()
+    setup_telemetry(config)
+
 if _MCP_AVAILABLE:
+
     mcp = FastMCP(
         "humane-proxy"
     )
@@ -144,9 +153,11 @@ def serve() -> None:
         raise RuntimeError(
             "MCP server requires fastmcp. Install with: pip install humane-proxy[mcp]"
         )
+
+    _init_telemetry()
+
     assert mcp is not None
     mcp.run()
-
 
 def serve_http(host: str = "0.0.0.0", port: int = 3000) -> None:
     """Start the MCP server in Streamable HTTP mode.
@@ -166,6 +177,8 @@ def serve_http(host: str = "0.0.0.0", port: int = 3000) -> None:
         raise RuntimeError(
             "MCP server requires fastmcp. Install with: pip install humane-proxy[mcp]"
         )
+
+    _init_telemetry()
+
     assert mcp is not None
     mcp.run(transport="http", host=host, port=port)
-

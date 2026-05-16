@@ -29,11 +29,24 @@ import hashlib
 import logging
 import os
 from typing import Any
+from contextlib import nullcontext
+
+# Optional OpenTelemetry support.
+try:
+    from opentelemetry import trace
+    from opentelemetry.trace import (
+        Status,
+        StatusCode,
+    )
+
+except ImportError:
+    trace = None
+    Status = None
+    StatusCode = None
 
 from humane_proxy.classifiers.models import (
     ClassificationResult,
     PipelineResult,
-    TrajectoryResult,
 )
 
 logger = logging.getLogger("humane_proxy.pipeline")
@@ -69,6 +82,11 @@ class SafetyPipeline:
             "store_message_text", False
         )
 
+        if trace is not None:
+            self._tracer = trace.get_tracer("humane_proxy.pipeline")
+        else:
+            self._tracer = None
+
         # Stage 2: embedding classifier.
         self._stage2: Any = None
         if 2 in self.enabled_stages:
@@ -80,6 +98,28 @@ class SafetyPipeline:
             self._init_stage3()
 
         self._show_stage3_warning()
+
+    def _span(self, name: str):
+        """
+        Safe span helper.
+
+        Returns:
+            Active span context manager when telemetry exists.
+            nullcontext() when telemetry disabled.
+        """
+
+        if self._tracer is None:
+            return nullcontext()
+
+        return self._tracer.start_as_current_span(name)
+
+    def _set_attr(self, span, key: str, value):
+        if span is not None:
+            span.set_attribute(key, value)
+
+    def _set_status(self, span, status):
+        if span is not None:
+            span.set_status(status)
 
     # ------------------------------------------------------------------
     # Initialisation helpers
@@ -173,7 +213,7 @@ class SafetyPipeline:
             "      export GROQ_API_KEY=gsk_...\n"
             "      # Set in humane_proxy.yaml:\n"
             "      # stage3:\n"
-            "      #   provider: \"llamaguard\"\n"
+            '      #   provider: "llamaguard"\n'
             "\n"
             "    See: https://github.com/Vishisht16/Humane-Proxy#stage-3-setup"
         )
@@ -182,78 +222,415 @@ class SafetyPipeline:
     # Classification — async (all 3 stages)
     # ------------------------------------------------------------------
 
-    async def classify(
-        self, text: str, session_id: str
-    ) -> PipelineResult:
+    async def classify(self, text: str, session_id: str) -> PipelineResult:
         """Run the full async pipeline (Stages 1 + 2 + 3)."""
-        # Stage 1 — Heuristics (always).
-        result = self._run_stage1(text)
 
-        # Early exit: clear dangerous (self_harm).
-        if result.category == "self_harm":
-            return self._finalize(result, session_id, text)
+        with self._span("humane_proxy.pipeline.classify") as span:
+            safe_session = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+            self._set_attr(span, "humane_proxy.session_id", safe_session)
+            # Stage 1 — Heuristics
+            # ------------------------------------------------------------------
 
-        # Early exit: clear safe — but only when no later stages can
-        # add value.  When Stage 2 is enabled, messages that heuristics
-        # consider safe MUST still flow to the embedding classifier
-        # (that is its entire purpose: catching semantically dangerous
-        # content that keyword matching misses).
-        stage2_enabled = 2 in self.enabled_stages and self._stage2 is not None
-        if (
-            not stage2_enabled
-            and result.score <= self.stage1_ceiling
-            and result.category == "safe"
-        ):
-            return self._finalize(result, session_id, text)
+            with self._span("humane_proxy.stage1") as stage1_span:
+                result = self._run_stage1(text)
 
-        # Stage 2 — Embeddings (if enabled).
-        if stage2_enabled:
-            s2 = self._stage2.classify(text)
-            result = self._combine(result, s2)
+                self._set_attr(
+                    stage1_span,
+                    "humane_proxy.category",
+                    result.category,
+                )
+                self._set_attr(
+                    stage1_span,
+                    "humane_proxy.final_score",
+                    result.score,
+                )
+                self._set_attr(
+                    stage1_span,
+                    "humane_proxy.triggers_count",
+                    len(result.triggers),
+                )
 
-            # Early exit after Stage 2.
-            if result.category == "self_harm":
-                return self._finalize(result, session_id, text)
-            if result.score <= self.stage2_ceiling and result.category == "safe":
-                return self._finalize(result, session_id, text)
+                # Early exit: clear dangerous (self_harm).
+                if result.category == "self_harm":
+                    final = self._finalize(result, session_id, text)
 
-        # Stage 3 — Reasoning LLM (if enabled).
-        if 3 in self.enabled_stages and self._stage3 is not None:
-            try:
-                s3 = await self._stage3.classify(text, result)
-                result = self._combine(result, s3)
-            except Exception:
-                logger.exception("Stage-3 classification failed")
-                result.triggers.append("stage3_error")
+                    self._set_attr(
+                        stage1_span,
+                        "humane_proxy.category",
+                        final.classification.category,
+                    )
+                    self._set_attr(
+                        stage1_span,
+                        "humane_proxy.score",
+                        final.classification.score,
+                    )
+                    self._set_attr(
+                        stage1_span,
+                        "humane_proxy.triggers_count",
+                        len(final.classification.triggers),
+                    )
+                    self._set_attr(
+                        stage1_span,
+                        "humane_proxy.stage_reached",
+                        final.classification.stage,
+                    )
 
-        return self._finalize(result, session_id, text)
+                    if final.message_hash:
+                        self._set_attr(
+                            stage1_span,
+                            "humane_proxy.message_hash",
+                            final.message_hash,
+                        )
+
+                    return final
+
+            # Early exit: clear safe — but only when no later stages can
+            # add value.
+            stage2_enabled = 2 in self.enabled_stages and self._stage2 is not None
+
+            if (
+                not stage2_enabled
+                and result.score <= self.stage1_ceiling
+                and result.category == "safe"
+            ):
+
+                final = self._finalize(result, session_id, text)
+
+                self._set_attr(
+                    stage1_span,
+                    "humane_proxy.category",
+                    final.classification.category,
+                )
+                self._set_attr(
+                    stage1_span,
+                    "humane_proxy.score",
+                    final.classification.score,
+                )
+                self._set_attr(
+                    stage1_span,
+                    "humane_proxy.triggers_count",
+                    len(final.classification.triggers),
+                )
+                self._set_attr(
+                    stage1_span,
+                    "humane_proxy.stage_reached",
+                    final.classification.stage,
+                )
+
+                if final.message_hash:
+                    self._set_attr(
+                        stage1_span,
+                        "humane_proxy.message_hash",
+                        final.message_hash,
+                    )
+
+                if span is not None and Status and StatusCode:
+                    span.set_status(Status(StatusCode.OK))
+
+                return final
+
+            # ------------------------------------------------------------------
+            # Stage 2 — Embeddings
+            # ------------------------------------------------------------------
+
+            if stage2_enabled:
+
+                with self._span("humane_proxy.stage2") as stage2_span:
+
+                    s2 = self._stage2.classify(text)
+                    result = self._combine(result, s2)
+
+                    self._set_attr(
+                        stage2_span,
+                        "humane_proxy.category",
+                        s2.category,
+                    )
+                    self._set_attr(
+                        stage2_span,
+                        "humane_proxy.final_score",
+                        s2.score,
+                    )
+                    self._set_attr(
+                        stage2_span,
+                        "humane_proxy.triggers_count",
+                        len(s2.triggers),
+                    )
+
+                    # Early exit after Stage 2.
+                    if result.category == "self_harm":
+
+                        final = self._finalize(result, session_id, text)
+
+                        self._set_attr(
+                            stage2_span,
+                            "humane_proxy.category",
+                            final.classification.category,
+                        )
+                        self._set_attr(
+                            stage1_span,
+                            "humane_proxy.final_score",
+                            final.classification.score,
+                        )
+                        self._set_attr(
+                            stage2_span,
+                            "humane_proxy.final_score",
+                            final.classification.score,
+                        )
+                        self._set_attr(
+                            stage2_span,
+                            "humane_proxy.triggers_count",
+                            len(final.classification.triggers),
+                        )
+                        self._set_attr(
+                            stage2_span,
+                            "humane_proxy.stage_reached",
+                            final.classification.stage,
+                        )
+
+                        if final.message_hash:
+                            self._set_attr(
+                                stage2_span,
+                                "humane_proxy.message_hash",
+                                final.message_hash,
+                            )
+
+                        return final
+
+                    if (
+                        result.score <= self.stage2_ceiling
+                        and result.category == "safe"
+                    ):
+
+                        final = self._finalize(result, session_id, text)
+
+                        return final
+
+            # ------------------------------------------------------------------
+            # Stage 3 — Reasoning LLM
+            # ------------------------------------------------------------------
+
+            if 3 in self.enabled_stages and self._stage3 is not None:
+
+                try:
+                    with self._span("humane_proxy.stage3") as stage3_span:
+
+                        s3 = await self._stage3.classify(text, result)
+                        result = self._combine(result, s3)
+
+                        self._set_attr(
+                            stage3_span,
+                            "humane_proxy.category",
+                            s3.category,
+                        )
+                        self._set_attr(
+                            stage3_span,
+                            "humane_proxy.final_score",
+                            s3.score,
+                        )
+                        self._set_attr(
+                            stage3_span,
+                            "humane_proxy.triggers_count",
+                            len(s3.triggers),
+                        )
+
+                except Exception as e:
+
+                    logger.exception("Stage-3 classification failed")
+
+                    if span is not None:
+                        span.record_exception(e)
+
+                    if span is not None and Status and StatusCode:
+                        span.set_status(Status(StatusCode.ERROR))
+
+                    result.triggers.append("stage3_error")
+
+            # ------------------------------------------------------------------
+            # Finalization
+            # ------------------------------------------------------------------
+
+            final = self._finalize(result, session_id, text)
+
+            self._set_attr(
+                span,
+                "humane_proxy.category",
+                final.classification.category,
+            )
+
+            self._set_attr(
+                span,
+                "humane_proxy.score",
+                final.classification.score,
+            )
+
+            self._set_attr(
+                span,
+                "humane_proxy.final_score",
+                final.classification.score,
+            )
+
+            self._set_attr(
+                span,
+                "humane_proxy.triggers_count",
+                len(final.classification.triggers),
+            )
+
+            self._set_attr(
+                span,
+                "humane_proxy.stage_reached",
+                final.classification.stage,
+            )
+
+            if final.message_hash:
+                self._set_attr(
+                    span,
+                    "humane_proxy.message_hash",
+                    final.message_hash,
+                )
+
+            if span is not None and Status and StatusCode:
+                span.set_status(Status(StatusCode.OK))
+
+            return final
 
     # ------------------------------------------------------------------
     # Classification — sync (Stages 1 + 2 only)
     # ------------------------------------------------------------------
 
     def classify_sync(
-        self, text: str, session_id: str
+        self,
+        text: str,
+        session_id: str,
     ) -> PipelineResult:
-        """Run the synchronous pipeline (Stages 1 + 2 only — no async)."""
-        result = self._run_stage1(text)
+        """Run synchronous pipeline (Stages 1 + 2 only)."""
 
-        if result.category == "self_harm":
-            return self._finalize(result, session_id, text)
+        with self._span("humane_proxy.pipeline.classify") as span:
 
-        stage2_enabled = 2 in self.enabled_stages and self._stage2 is not None
-        if (
-            not stage2_enabled
-            and result.score <= self.stage1_ceiling
-            and result.category == "safe"
-        ):
-            return self._finalize(result, session_id, text)
+            safe_session = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
 
-        if stage2_enabled:
-            s2 = self._stage2.classify(text)
-            result = self._combine(result, s2)
+            self._set_attr(
+                span,
+                "humane_proxy.session_id",
+                safe_session,
+            )
 
-        return self._finalize(result, session_id, text)
+            with self._span("humane_proxy.stage1") as stage1_span:
+                result = self._run_stage1(text)
+
+                self._set_attr(
+                    stage1_span,
+                    "humane_proxy.category",
+                    result.category,
+                )
+
+                self._set_attr(
+                    stage1_span,
+                    "humane_proxy.final_score",
+                    result.score,
+                )
+
+                self._set_attr(
+                    stage1_span,
+                    "humane_proxy.triggers_count",
+                    len(result.triggers),
+                )
+
+            if result.category == "self_harm":
+                final = self._finalize(
+                    result,
+                    session_id,
+                    text,
+                )
+
+                return final
+
+            stage2_enabled = 2 in self.enabled_stages and self._stage2 is not None
+
+            if (
+                not stage2_enabled
+                and result.score <= self.stage1_ceiling
+                and result.category == "safe"
+            ):
+                return self._finalize(
+                    result,
+                    session_id,
+                    text,
+                )
+
+            if stage2_enabled:
+                with self._span("humane_proxy.stage2") as stage2_span:
+
+                    s2 = self._stage2.classify(text)
+
+                    self._set_attr(
+                        stage2_span,
+                        "humane_proxy.category",
+                        s2.category,
+                    )
+
+                    self._set_attr(
+                        stage2_span,
+                        "humane_proxy.final_score",
+                        s2.score,
+                    )
+
+                    self._set_attr(
+                        stage2_span,
+                        "humane_proxy.triggers_count",
+                        len(s2.triggers),
+                    )
+
+                    self._set_attr(
+                        stage2_span,
+                        "humane_proxy.stage_reached",
+                        s2.stage,
+                    )
+
+                    result = self._combine(result, s2)
+
+            final = self._finalize(result, session_id, text)
+
+            self._set_attr(
+                span,
+                "humane_proxy.category",
+                final.classification.category,
+            )
+
+            self._set_attr(
+                span,
+                "humane_proxy.score",
+                final.classification.score,
+            )
+
+            self._set_attr(
+                span,
+                "humane_proxy.final_score",
+                final.classification.score,
+            )
+
+            self._set_attr(
+                span,
+                "humane_proxy.triggers_count",
+                len(final.classification.triggers),
+            )
+
+            self._set_attr(
+                span,
+                "humane_proxy.stage_reached",
+                final.classification.stage,
+            )
+
+            if final.message_hash:
+                self._set_attr(
+                    span,
+                    "humane_proxy.message_hash",
+                    final.message_hash,
+                )
+
+            if span is not None and Status and StatusCode:
+                span.set_status(Status(StatusCode.OK))
+
+            return final
 
     # ------------------------------------------------------------------
     # Stage 1 wrapper
@@ -329,50 +706,86 @@ class SafetyPipeline:
         """Apply trajectory, self-harm threshold, and escalation logic."""
         from humane_proxy.risk.trajectory import analyze
 
-        # Trajectory analysis.
-        traj = analyze(session_id, result.score, result.category)
+        with self._span("humane_proxy.pipeline.finalize") as finalize_span:
 
-        # Spike boost.
-        if traj.spike_detected:
-            result.score = min(result.score + self.spike_boost, 1.0)
-            result.triggers.append("trajectory_spike")
+            # Trajectory analysis.
+            traj = analyze(session_id, result.score, result.category)
 
-        # Self-harm threshold-aware override.
-        self_harm_cfg = self._config.get("safety", {}).get("categories", {}).get("self_harm", {})
-        self_harm_threshold = self_harm_cfg.get("escalate_threshold", 0.5)
+            # Spike boost.
+            if traj.spike_detected:
+                result.score = min(result.score + self.spike_boost, 1.0)
+                result.triggers.append("trajectory_spike")
 
-        if result.category == "self_harm":
-            if result.score >= self_harm_threshold:
-                # Definitive self-harm — force to 1.0.
-                result.score = 1.0
-            else:
-                # Below threshold — downgrade to safe for transparency.
-                result.triggers.append(
-                    f"self_harm_below_threshold:{result.score:.3f}<{self_harm_threshold}"
-                )
-                result.category = "safe"
+            # Self-harm threshold-aware override.
+            self_harm_cfg = (
+                self._config.get("safety", {})
+                .get("categories", {})
+                .get("self_harm", {})
+            )
+            self_harm_threshold = self_harm_cfg.get("escalate_threshold", 0.5)
 
-        result.score = min(result.score, 1.0)
+            if result.category == "self_harm":
+                if result.score >= self_harm_threshold:
+                    # Definitive self-harm — force to 1.0.
+                    result.score = 1.0
+                else:
+                    # Below threshold — downgrade to safe for transparency.
+                    result.triggers.append(
+                        f"self_harm_below_threshold:{result.score:.3f}<{self_harm_threshold}"
+                    )
+                    result.category = "safe"
 
-        # Escalation decision.
-        should_escalate = (
-            result.category == "self_harm"
-            or (
+            result.score = min(result.score, 1.0)
+
+            # Escalation decision.
+            should_escalate = result.category == "self_harm" or (
                 result.category == "criminal_intent"
                 and result.score >= self.risk_threshold
             )
-        )
-        should_block = should_escalate
+            should_block = should_escalate
 
-        # Privacy: hash the message.
-        message_hash: str | None = None
-        if not self.store_message_text:
-            message_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            # Privacy: hash the message.
+            message_hash: str | None = None
+            if not self.store_message_text:
+                message_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                if message_hash:
+                    self._set_attr(
+                        finalize_span,
+                        "humane_proxy.message_hash",
+                        message_hash,
+                    )
 
-        return PipelineResult(
-            classification=result,
-            trajectory=traj,
-            should_escalate=should_escalate,
-            should_block=should_block,
-            message_hash=message_hash,
-        )
+            if finalize_span is not None and Status and StatusCode:
+                self._set_status(finalize_span, Status(StatusCode.OK))
+
+            self._set_attr(
+                finalize_span,
+                "humane_proxy.category",
+                result.category,
+            )
+
+            self._set_attr(
+                finalize_span,
+                "humane_proxy.final_score",
+                result.score,
+            )
+
+            self._set_attr(
+                finalize_span,
+                "humane_proxy.triggers_count",
+                len(result.triggers),
+            )
+
+            self._set_attr(
+                finalize_span,
+                "humane_proxy.stage_reached",
+                result.stage,
+            )
+
+            return PipelineResult(
+                classification=result,
+                trajectory=traj,
+                should_escalate=should_escalate,
+                should_block=should_block,
+                message_hash=message_hash,
+            )

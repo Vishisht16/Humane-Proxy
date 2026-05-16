@@ -16,12 +16,12 @@ The ``hp`` alias is also available::
 
 from __future__ import annotations
 
-import os
-import shutil
 import sys
 from pathlib import Path
 
 import click
+
+from humane_proxy.telemetry import setup_telemetry
 
 _BANNER = r"""
   _   _                                  ____
@@ -137,7 +137,6 @@ LLM_API_URL=
 # HUMANE_PROXY_DB_PATH=/path/to/escalations.db
 """
 
-
 @click.group()
 def main() -> None:
     """🛡️  HumaneProxy — AI safety middleware that protects humans."""
@@ -185,6 +184,10 @@ def start(host: str | None, port: int | None, reload: bool | None) -> None:
     from humane_proxy.config import get_config
 
     cfg = get_config()
+
+    # Initialize OpenTelemetry (optional).
+    setup_telemetry(cfg)
+
     server_cfg = cfg.get("server", {})
 
     final_host = host or server_cfg.get("host", "0.0.0.0")
@@ -215,7 +218,6 @@ def check(text: str, session: str) -> None:
 
     proxy = HumaneProxy()
     result = proxy.check(text, session_id=session)
-
     category = result.get("category", "safe")
 
     if category == "self_harm":
@@ -249,48 +251,75 @@ def version() -> None:
 
 
 @main.command()
-@click.option("--category", "-c", default=None,
-              help="Filter by category: self_harm | criminal_intent")
-@click.option("--limit", "-n", default=20, type=int, help="Max records (default 20)")
-@click.option("--session", "-s", default=None, help="Filter by session ID")
-def escalations(category: str | None, limit: int, session: str | None) -> None:
+@click.option(
+    "--category",
+    "-c",
+    default=None,
+    help="Filter by category: self_harm | criminal_intent",
+)
+@click.option(
+    "--limit",
+    "-n",
+    default=20,
+    type=int,
+    help="Max records (default 20)",
+)
+@click.option(
+    "--session",
+    "-s",
+    default=None,
+    help="Filter by session ID",
+)
+def escalations(
+    category: str | None,
+    limit: int,
+    session: str | None,
+) -> None:
     """List recent escalation events from the audit log."""
-    import json
-    import sqlite3
-    from humane_proxy.escalation.local_db import _get_db_path
 
-    conn = sqlite3.connect(_get_db_path(), check_same_thread=False)
-    try:
-        clauses, params = [], []
-        if category:
-            clauses.append("category = ?")
-            params.append(category)
-        if session:
-            clauses.append("session_id = ?")
-            params.append(session)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        rows = conn.execute(
-            f"SELECT id, session_id, category, risk_score, timestamp FROM escalations "
-            f"{where} ORDER BY timestamp DESC LIMIT ?",
-            params + [limit],
-        ).fetchall()
-    finally:
-        conn.close()
+    from humane_proxy.escalation.local_db import init_db
+    from humane_proxy.storage.factory import get_store
+    # Ensure tables exist.
+    init_db()
+
+    store = get_store()
+
+    rows = store.query(
+        category=category,
+        session_id=session,
+        limit=limit,
+    )
 
     if not rows:
         click.echo("  ℹ  No escalations found.")
         return
 
-    click.echo(f"\n  {'ID':<6} {'Session':<28} {'Category':<18} {'Score':<7} {'When'}")
-    click.echo("  " + "-" * 75)
-    for row in rows:
-        id_, sid, cat, score, ts = row
-        from datetime import datetime, timezone
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        emoji = "🆘" if cat == "self_harm" else "⚠️"
-        click.echo(f"  {id_:<6} {sid:<28} {emoji} {cat:<16} {score:.2f}  {dt}")
-    click.echo("")
+    click.echo(
+        f"\n  {'ID':<6} {'Session':<28} "
+        f"{'Category':<18} {'Score':<7} {'When'}"
+    )
 
+    click.echo("  " + "-" * 75)
+
+    for row in rows:
+        from datetime import datetime, timezone
+
+        dt = datetime.fromtimestamp(
+            row["timestamp"],
+            tz=timezone.utc,
+        ).strftime("%Y-%m-%d %H:%M UTC")
+
+        emoji = "🆘" if row["category"] == "self_harm" else "⚠️"
+
+        click.echo(
+            f"  {row['id']:<6} "
+            f"{row['session_id']:<28} "
+            f"{emoji} {row['category']:<16} "
+            f"{row['risk_score']:.2f}  "
+            f"{dt}"
+        )
+
+    click.echo("")
 
 @main.command()
 @click.argument("session_id")
@@ -298,8 +327,12 @@ def session(session_id: str) -> None:
     """Show risk trajectory and escalation history for a session."""
     import json
     import sqlite3
-    from humane_proxy.escalation.local_db import _get_db_path
-    from humane_proxy.risk.trajectory import analyze
+    from humane_proxy.escalation.local_db import (
+        _get_db_path,
+        init_db,
+    )
+
+    init_db()
 
     conn = sqlite3.connect(_get_db_path(), check_same_thread=False)
     try:

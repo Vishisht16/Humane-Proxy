@@ -77,6 +77,12 @@ trajectory:
   window_size: 5
   spike_delta: 0.35
 
+# Optional OpenTelemetry tracing (disabled by default)
+telemetry:
+  enabled: false
+  service_name: "humane-proxy"
+  otlp_endpoint: "http://localhost:4318/v1/traces"
+
 escalation:
   rate_limit_max: 3
   rate_limit_window_hours: 1
@@ -84,3 +90,9 @@ escalation:
     slack_url: ""
     discord_url: ""
     pagerduty_routing_key: ""
+
+pipeline:
+  enabled_stages: [1, 2, 3]
+
+stage3:
+  provider: "openai_moderation"

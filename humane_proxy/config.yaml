@@ -17,6 +17,32 @@ safety:
   # Maximum number of messages to retain per session for trajectory analysis.
   session_history_limit: 20
 
+  categories:
+    self_harm:
+      # Always notify the operator when self-harm is detected.
+      always_escalate: true
+
+      # Self-harm escalation threshold: embedding/pipeline scores at or above
+      # this value trigger escalation.  Scores below are downgraded to safe.
+      # Set lower for more aggressive catching, higher to reduce false positives.
+      escalate_threshold: 0.5
+
+      # "block"   (default / Mode B) — HumaneProxy itself replies with an
+      #           empathetic message and international crisis resources.
+      # "forward" (Mode A) — forward to the upstream LLM with a care-context
+      #           system prompt injected before the user message.
+      response_mode: "block"
+
+      # Optional: override the default block message (leave empty to use built-in).
+      block_message: ""
+
+    criminal_intent:
+      # Score threshold for escalation (below this → only log, no webhook).
+      escalate_threshold: 0.65
+
+      # Score threshold for blocking the request entirely.
+      block_threshold: 0.80
+
 heuristics:
   # Self-harm keywords — phrases that indicate self-harm ideation.
   self_harm_keywords:
@@ -109,17 +135,6 @@ trajectory:
   #   0   → disable decay entirely (plain unweighted mean)
   decay_half_life_hours: 24.0
 
-escalation:
-  # Per-session rate limiting for escalation logging.
-  rate_limit_max: 3
-  rate_limit_window_hours: 1
-
-  # Webhook URLs — leave empty to disable.
-  webhooks:
-    slack_url: ""
-    discord_url: ""
-    pagerduty_routing_key: ""
-
 # ---------------------------------------------------------------------------
 # 3-Stage Cascade Pipeline (Phase 2)
 # ---------------------------------------------------------------------------
@@ -168,6 +183,21 @@ stage3:
     api_url: "https://api.openai.com/v1/chat/completions"
     model: "gpt-4o-mini"
 
+# ---------------------------------------------------------------------------
+# Telemetry / Observability
+# ---------------------------------------------------------------------------
+
+telemetry:
+  # Enable OpenTelemetry tracing.
+  # Completely disabled by default for zero overhead.
+  enabled: false
+
+  # OTLP HTTP endpoint for trace export.
+  otlp_endpoint: "http://localhost:4318/v1/traces"
+
+  # Service name reported to tracing backends.
+  service_name: "humane-proxy"
+
 privacy:
   # If false (default), only a SHA-256 hash of the message is stored
   # in the escalation DB — never the raw text.
@@ -177,38 +207,6 @@ privacy:
 # Phase 3 — Care Response & Category-Specific Behaviour
 # ---------------------------------------------------------------------------
 
-safety:
-  risk_threshold: 0.7
-  spike_boost: 0.25
-  session_history_limit: 20
-
-  categories:
-    self_harm:
-      # Always notify the operator when self-harm is detected.
-      always_escalate: true
-
-      # Self-harm escalation threshold: embedding/pipeline scores at or above
-      # this value trigger escalation.  Scores below are downgraded to safe.
-      # Set lower for more aggressive catching, higher to reduce false positives.
-      escalate_threshold: 0.5
-
-      # "block"   (default / Mode B) — HumaneProxy itself replies with an
-      #           empathetic message and international crisis resources.
-      # "forward" (Mode A) — forward to the upstream LLM with a care-context
-      #           system prompt injected before the user message.
-      response_mode: "block"
-
-      # Optional: override the default block message (leave empty to use built-in).
-      block_message: ""
-
-    criminal_intent:
-      # Score threshold for escalation (below this → only log, no webhook).
-      escalate_threshold: 0.65
-
-      # Score threshold for blocking the request entirely.
-      block_threshold: 0.80
-
-# ---------------------------------------------------------------------------
 # Storage Backend
 # ---------------------------------------------------------------------------
 

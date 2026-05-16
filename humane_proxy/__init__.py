@@ -24,7 +24,14 @@ __version__ = "0.4.0"
 # ---------------------------------------------------------------------------
 
 from pathlib import Path
+import hashlib
+from contextlib import nullcontext
 import yaml
+
+try:
+    from opentelemetry import trace as ot_trace
+except ImportError:
+    ot_trace = None
 
 _CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
 
@@ -65,19 +72,37 @@ class HumaneProxy:
 
     def __init__(self, config_path: str | None = None) -> None:
         import os
+
         if config_path:
             os.environ["HUMANE_PROXY_CONFIG"] = str(config_path)
 
         from humane_proxy.config import reload_config
+
         self._config = reload_config()
 
         # Ensure DB is initialised.
         from humane_proxy.escalation.local_db import init_db
+
         init_db()
+
+        # Initialize OpenTelemetry for direct library usage.
+        from humane_proxy.telemetry import setup_telemetry
+
+        setup_telemetry(self._config)
+
+        self._proxy_tracer = (
+            ot_trace.get_tracer("humane_proxy.proxy") if ot_trace is not None else None
+        )
 
         # Initialise the pipeline.
         from humane_proxy.classifiers.pipeline import SafetyPipeline
+
         self._pipeline = SafetyPipeline(self._config)
+
+    def _span(self, name: str):
+        if self._proxy_tracer is None:
+            return nullcontext()
+        return self._proxy_tracer.start_as_current_span(name)
 
     @property
     def config(self) -> dict:
@@ -98,7 +123,12 @@ class HumaneProxy:
             ``{"safe": bool, "category": str, "score": float, "triggers": list,
                "stage_reached": int, ...}``
         """
-        result = self._pipeline.classify_sync(text, session_id)
+        with self._span("humane_proxy.proxy.check") as span:
+            span.set_attribute(
+                "humane_proxy.session_id",
+                hashlib.sha256(session_id.encode("utf-8")).hexdigest(),
+            )
+            result = self._pipeline.classify_sync(text, session_id)
         return result.to_dict()
 
     async def check_async(self, text: str, session_id: str = "programmatic") -> dict:
@@ -110,10 +140,16 @@ class HumaneProxy:
             Same as :meth:`check`, but potentially enriched with Stage-3
             reasoning and higher accuracy.
         """
-        result = await self._pipeline.classify(text, session_id)
+        with self._span("humane_proxy.proxy.check_async") as span:
+            span.set_attribute(
+                "humane_proxy.session_id",
+                hashlib.sha256(session_id.encode("utf-8")).hexdigest(),
+            )
+            result = await self._pipeline.classify(text, session_id)
         return result.to_dict()
 
     def as_fastapi_app(self):
         """Return the configured FastAPI application instance."""
         from humane_proxy.middleware.interceptor import app
+
         return app

@@ -58,14 +58,17 @@ def _apply_env_overrides(config: dict) -> dict:
     """Apply HUMANE_PROXY_* environment variables as flat overrides.
 
     Mapping (env var → config path):
-        HUMANE_PROXY_RISK_THRESHOLD  →  safety.risk_threshold
-        HUMANE_PROXY_HOST            →  server.host
-        HUMANE_PROXY_PORT            →  server.port
-        HUMANE_PROXY_SPIKE_BOOST     →  safety.spike_boost
-        HUMANE_PROXY_SLACK_URL       →  escalation.webhooks.slack_url
-        HUMANE_PROXY_DISCORD_URL     →  escalation.webhooks.discord_url
-        HUMANE_PROXY_PAGERDUTY_KEY   →  escalation.webhooks.pagerduty_routing_key
-        HUMANE_PROXY_DB_PATH         →  escalation.db_path
+        HUMANE_PROXY_RISK_THRESHOLD     →  safety.risk_threshold
+        HUMANE_PROXY_HOST               →  server.host
+        HUMANE_PROXY_PORT               →  server.port
+        HUMANE_PROXY_SPIKE_BOOST        →  safety.spike_boost
+        HUMANE_PROXY_SLACK_URL          →  escalation.webhooks.slack_url
+        HUMANE_PROXY_DISCORD_URL        →  escalation.webhooks.discord_url
+        HUMANE_PROXY_PAGERDUTY_KEY      →  escalation.webhooks.pagerduty_routing_key
+        HUMANE_PROXY_DB_PATH            →  escalation.db_path
+        HUMANE_PROXY_TELEMETRY_ENABLED  → telemetry.enabled
+        HUMANE_PROXY_OTLP_ENDPOINT      → telemetry.otlp_endpoint
+        HUMANE_PROXY_SERVICE_NAME       → telemetry.service_name
     """
     _ENV_MAP: dict[str, tuple[list[str], type]] = {
         "HUMANE_PROXY_RISK_THRESHOLD": (["safety", "risk_threshold"], float),
@@ -89,6 +92,10 @@ def _apply_env_overrides(config: dict) -> dict:
         "HUMANE_PROXY_REDIS_URL": (["storage", "redis", "url"], str),
         "HUMANE_PROXY_POSTGRES_DSN": (["storage", "postgres", "dsn"], str),
         "HUMANE_PROXY_DECAY_HALF_LIFE": (["trajectory", "decay_half_life_hours"], float),
+        # Telemetry
+        "HUMANE_PROXY_TELEMETRY_ENABLED": (["telemetry", "enabled"],bool,),
+        "HUMANE_PROXY_OTLP_ENDPOINT": (["telemetry", "otlp_endpoint"],str,),
+        "HUMANE_PROXY_SERVICE_NAME": (["telemetry", "service_name"],str,),
     }
 
     for env_key, (path, cast) in _ENV_MAP.items():
