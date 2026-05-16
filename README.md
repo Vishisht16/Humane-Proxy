@@ -521,10 +521,54 @@ All values can be set in `humane_proxy.yaml` (project root) or via `HUMANE_PROXY
 | `pipeline.stage2_ceiling` | `HUMANE_PROXY_STAGE2_CEILING` | `0.4` | Early exit after Stage 2 |
 | `stage3.provider` | `HUMANE_PROXY_STAGE3_PROVIDER` | `"auto"` | Stage 3 provider |
 | `stage3.timeout` | `HUMANE_PROXY_STAGE3_TIMEOUT` | `10` | Stage 3 timeout (s) |
+| `telemetry.enabled` | `HUMANE_PROXY_TELEMETRY_ENABLED` | `false` | Enable OpenTelemetry tracing (requires `humane-proxy[telemetry]`) |
+| `telemetry.otlp_endpoint` | `HUMANE_PROXY_OTLP_ENDPOINT` | `http://localhost:4318/v1/traces` | OTLP trace collector endpoint |
+| `telemetry.service_name` | `HUMANE_PROXY_SERVICE_NAME` | `"humane-proxy"` | Service name reported to backend |
 | `privacy.store_message_text` | — | `false` | Store raw text (vs SHA-256 hash) |
 | `escalation.rate_limit_max` | `HUMANE_PROXY_RATE_LIMIT_MAX` | `3` | Max alerts per session/window |
 | `storage.backend` | `HUMANE_PROXY_STORAGE_BACKEND` | `"sqlite"` | `"sqlite"`, `"redis"`, `"postgres"` |
 | `safety.categories.self_harm.response_mode` | — | `"block"` | `"block"` or `"forward"` |
+
+---
+
+## OpenTelemetry Tracing
+
+HumaneProxy can emit OpenTelemetry traces for the safety pipeline and top-level proxy calls. This feature is optional and disabled by default for zero performance overhead.
+
+Install the telemetry extras:
+
+```bash
+pip install humane-proxy[telemetry]
+```
+
+Enable tracing in `humane_proxy.yaml`:
+
+```yaml
+telemetry:
+  enabled: true
+  otlp_endpoint: "http://localhost:4318/v1/traces"
+  service_name: "humane-proxy"
+```
+
+Or use environment variables:
+
+```bash
+export HUMANE_PROXY_TELEMETRY_ENABLED=true
+export HUMANE_PROXY_OTLP_ENDPOINT=http://localhost:4318/v1/traces
+export HUMANE_PROXY_SERVICE_NAME=humane-proxy
+```
+
+When enabled, spans include:
+
+- `humane_proxy.proxy.check` / `humane_proxy.proxy.check_async`
+- `humane_proxy.pipeline.classify`
+- `humane_proxy.stage1`
+- `humane_proxy.stage2`
+- `humane_proxy.stage3`
+- `humane_proxy.pipeline.finalize`
+
+Only safe telemetry attributes are emitted:
+`session_id` (hashed), `category`, `score`, `final_score`, `triggers_count`, `stage_reached`, and `message_hash`.
 
 ---
 
