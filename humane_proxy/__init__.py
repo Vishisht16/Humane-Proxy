@@ -120,7 +120,7 @@ class HumaneProxy:
                "stage_reached": int, ...}``
         """
         with self._span("humane_proxy.proxy.check") as span:
-            if span is not None: 
+            if span is not None and span.is_recording(): 
                 span.set_attribute(
                     "humane_proxy.session_id",
                     hashlib.sha256(session_id.encode("utf-8")).hexdigest(),
@@ -138,7 +138,7 @@ class HumaneProxy:
             reasoning and higher accuracy.
         """
         with self._span("humane_proxy.proxy.check_async") as span:
-            if span is not None: 
+            if span is not None and span.is_recording(): 
                 span.set_attribute(
                     "humane_proxy.session_id",
                     hashlib.sha256(session_id.encode("utf-8")).hexdigest(),
