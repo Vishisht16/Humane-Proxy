@@ -8,6 +8,7 @@ Requires: pip install humane-proxy[mcp]
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 
@@ -15,7 +16,25 @@ logger = logging.getLogger("humane_proxy.mcp")
 
 MCP_TOKEN_ENV = "HUMANE_PROXY_ADMIN_KEY"
 MCP_DEFAULT_HOST = "127.0.0.1"
-_PUBLIC_BIND_HOSTS = {"0.0.0.0", "::", "[::]"}
+
+
+def _is_public_bind_host(host: str) -> bool:
+    """Return whether an HTTP bind host may be reachable beyond localhost."""
+    normalized = (host or "").strip()
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+
+    if not normalized:
+        return True
+    if normalized.lower() == "localhost":
+        return False
+
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        return True
+
+    return not address.is_loopback
 
 
 def _get_mcp_auth_provider():
@@ -187,7 +206,7 @@ def serve_http(host: str = MCP_DEFAULT_HOST, port: int = 3000) -> None:
         raise RuntimeError(
             "MCP server requires fastmcp. Install with: pip install humane-proxy[mcp]"
         )
-    if host in _PUBLIC_BIND_HOSTS and not os.environ.get(MCP_TOKEN_ENV, "").strip():
+    if _is_public_bind_host(host) and not os.environ.get(MCP_TOKEN_ENV, "").strip():
         logger.warning(
             "Starting HTTP MCP on public host %s without %s. "
             "Set a bearer token before exposing this server beyond localhost.",

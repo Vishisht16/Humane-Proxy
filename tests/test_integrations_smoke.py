@@ -103,3 +103,34 @@ def test_llamaindex_session_risk_is_read_only():
     assert result["message_count"] == before_count
     assert len(session_history[sid]) == before_count
     assert len(_category_history[sid]) == before_count
+
+
+def test_crewai_session_risk_is_read_only():
+    import json
+    import sys
+
+    class MockBaseTool:
+        pass
+
+    mock_crewai = MagicMock()
+    mock_crewai.tools.BaseTool = MockBaseTool
+    sys.modules["crewai"] = mock_crewai
+    sys.modules["crewai.tools"] = mock_crewai.tools
+
+    try:
+        from humane_proxy.integrations.crewai import get_safety_tools
+
+        sid = "crewai-risk-read-only"
+        analyze(sid, 0.7, "self_harm")
+        before_count = len(session_history[sid])
+
+        tools = get_safety_tools()
+        risk_tool = next(tool for tool in tools if tool.name == "get_session_risk")
+        result = json.loads(risk_tool._run(sid))
+
+        assert result["message_count"] == before_count
+        assert len(session_history[sid]) == before_count
+        assert len(_category_history[sid]) == before_count
+    finally:
+        del sys.modules["crewai"]
+        del sys.modules["crewai.tools"]

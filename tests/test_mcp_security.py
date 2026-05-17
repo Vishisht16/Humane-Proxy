@@ -10,6 +10,7 @@ from humane_proxy.mcp_server import (
     MCP_DEFAULT_HOST,
     MCP_TOKEN_ENV,
     _get_mcp_auth_provider,
+    _is_public_bind_host,
     serve_http,
 )
 
@@ -65,3 +66,29 @@ def test_escalation_query_limit_is_clamped(raw_limit, expected):
 def test_escalation_query_rejects_unknown_categories():
     with pytest.raises(ValueError, match="category must be one of"):
         normalize_escalation_query(20, "all_data")
+
+
+def test_escalation_query_treats_whitespace_category_as_unfiltered():
+    limit, category = normalize_escalation_query(20, "   ")
+
+    assert limit == 20
+    assert category is None
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("127.0.0.1", False),
+        ("::1", False),
+        ("localhost", False),
+        ("0.0.0.0", True),
+        ("::", True),
+        ("[::]", True),
+        ("192.168.1.10", True),
+        ("10.0.0.5", True),
+        ("mcp.example.com", True),
+        ("", True),
+    ],
+)
+def test_public_bind_detection_flags_non_loopback_hosts(host, expected):
+    assert _is_public_bind_host(host) is expected

@@ -42,6 +42,7 @@ _MAX_SESSIONS: int = 1000
 # Each entry is (score, timestamp_seconds).
 session_history: dict[str, deque[tuple[float, float]]] = {}
 _category_history: dict[str, deque[str]] = {}
+_last_spike_by_session: dict[str, bool] = {}
 
 
 def _evict_oldest_sessions() -> None:
@@ -55,6 +56,7 @@ def _evict_oldest_sessions() -> None:
         oldest_key = next(iter(session_history))
         del session_history[oldest_key]
         _category_history.pop(oldest_key, None)
+        _last_spike_by_session.pop(oldest_key, None)
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +195,7 @@ def analyze(
     """
     # Run spike detection (this also appends the score to session_history).
     spike = detect_spike(session_id, score)
+    _last_spike_by_session[session_id] = spike
 
     # Track category history.
     if session_id not in _category_history:
@@ -218,7 +221,7 @@ def snapshot(session_id: str) -> TrajectoryResult:
     scores = [s for s, _ in history]
 
     return TrajectoryResult(
-        spike_detected=False,
+        spike_detected=_last_spike_by_session.get(session_id, False),
         trend=_trend_for_scores(scores),
         window_scores=scores,
         category_counts=_category_counts(session_id),

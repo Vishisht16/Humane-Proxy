@@ -18,7 +18,9 @@ def normalize_escalation_query(
         normalized_limit = DEFAULT_ESCALATION_LIMIT
 
     normalized_limit = max(1, min(normalized_limit, MAX_ESCALATION_LIMIT))
-    normalized_category = category.strip() if category else None
+    normalized_category = category.strip() if isinstance(category, str) else None
+    if normalized_category == "":
+        normalized_category = None
 
     if normalized_category and normalized_category not in ALLOWED_ESCALATION_CATEGORIES:
         allowed = ", ".join(sorted(ALLOWED_ESCALATION_CATEGORIES))

@@ -11,6 +11,7 @@ from humane_proxy.risk.trajectory import (
     session_history,
     snapshot,
     _category_history,
+    _last_spike_by_session,
     _weighted_mean,
 )
 from humane_proxy.classifiers.models import TrajectoryResult
@@ -151,6 +152,17 @@ class TestAnalyze:
         assert second.category_counts == {"safe": 1, "self_harm": 1}
         assert len(session_history[sid]) == 2
         assert len(_category_history[sid]) == 2
+
+    def test_snapshot_preserves_last_spike_state(self):
+        sid = "snapshot-spike-state-v3"
+        for _ in range(3):
+            analyze(sid, 0.1, "safe")
+        analyze(sid, 0.9, "self_harm")
+
+        result = snapshot(sid)
+
+        assert result.spike_detected is True
+        assert _last_spike_by_session[sid] is True
 
     def test_snapshot_empty_session(self):
         result = snapshot("snapshot-empty-v3")
