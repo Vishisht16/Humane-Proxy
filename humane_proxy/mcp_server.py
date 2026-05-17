@@ -8,7 +8,9 @@ Requires: pip install humane-proxy[mcp]
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import os
 
 logger = logging.getLogger("humane_proxy.mcp")
 
@@ -18,6 +20,9 @@ try:
 except ImportError:
     _MCP_AVAILABLE = False
     FastMCP = None  # type: ignore[assignment,misc]
+
+MCP_TOKEN_ENV = "HUMANE_PROXY_ADMIN_KEY"
+MCP_DEFAULT_HOST = "0.0.0.0"
 
 # ---------------------------------------------------------------------------
 # MCP app instance
@@ -31,10 +36,30 @@ def _init_telemetry() -> None:
     config = get_config()
     setup_telemetry(config)
 
+def _get_mcp_auth_provider():
+    """Return FastMCP Bearer auth provider when MCP auth is configured."""
+    token = os.environ.get(MCP_TOKEN_ENV, "").strip()
+    if not token:
+        return None
+
+    try:
+        from fastmcp.server.auth import BearerTokenAuth  # type: ignore[import]
+    except ImportError as exc:
+        raise RuntimeError(
+            f"{MCP_TOKEN_ENV} is set, but FastMCP does not support auth. "
+            "Upgrade fastmcp to enable HTTP MCP auth."
+        ) from exc
+
+    return BearerTokenAuth(token=token)
+
 if _MCP_AVAILABLE:
 
+    auth_provider = _get_mcp_auth_provider()
+    mcp_kwargs = {"auth": auth_provider} if auth_provider is not None else {}
+
     mcp = FastMCP(
-        "humane-proxy"
+        "humane-proxy",
+        **mcp_kwargs,
     )
 
     @mcp.tool()
@@ -146,6 +171,23 @@ if _MCP_AVAILABLE:
 else:
     mcp = None  # type: ignore[assignment]
 
+def _is_public_bind_host(host: str) -> bool:
+    normalized = (host or "").strip()
+
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+
+    if not normalized:
+        return True
+    if normalized.lower() == "localhost":
+        return False
+
+    try:
+        ip = ipaddress.ip_address(normalized)
+    except ValueError:
+        return True
+
+    return not ip.is_loopback
 
 def serve() -> None:
     """Start the MCP server in stdio mode (called by `humane-proxy mcp-serve`)."""
@@ -159,23 +201,20 @@ def serve() -> None:
     assert mcp is not None
     mcp.run()
 
-def serve_http(host: str = "0.0.0.0", port: int = 3000) -> None:
-    """Start the MCP server in Streamable HTTP mode.
+def serve_http(host: str = MCP_DEFAULT_HOST, port: int = 3000) -> None:
+    """Start the MCP server in Streamable HTTP mode."""
 
-    This exposes the MCP tools over HTTP, making the server compatible
-    with remote MCP clients and registries like Smithery that require
-    a publicly accessible HTTPS endpoint.
-
-    Parameters
-    ----------
-    host:
-        Bind address (default ``"0.0.0.0"``).
-    port:
-        Bind port (default ``3000``).
-    """
     if not _MCP_AVAILABLE:
         raise RuntimeError(
             "MCP server requires fastmcp. Install with: pip install humane-proxy[mcp]"
+        )
+
+    if _is_public_bind_host(host) and not os.environ.get(MCP_TOKEN_ENV, "").strip():
+        logger.warning(
+            "Starting HTTP MCP on public host %s without %s. "
+            "Set a bearer token before exposing this server beyond localhost.",
+            host,
+            MCP_TOKEN_ENV,
         )
 
     _init_telemetry()
