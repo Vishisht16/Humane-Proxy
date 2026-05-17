@@ -61,9 +61,6 @@ except ImportError:
     _MCP_AVAILABLE = False
     FastMCP = None  # type: ignore[assignment,misc]
 
-MCP_TOKEN_ENV = "HUMANE_PROXY_ADMIN_KEY"
-MCP_DEFAULT_HOST = "0.0.0.0"
-
 # ---------------------------------------------------------------------------
 # MCP app instance
 # ---------------------------------------------------------------------------
@@ -76,29 +73,13 @@ def _init_telemetry() -> None:
     config = get_config()
     setup_telemetry(config)
 
-def _get_mcp_auth_provider():
-    """Return FastMCP Bearer auth provider when MCP auth is configured."""
-    token = os.environ.get(MCP_TOKEN_ENV, "").strip()
-    if not token:
-        return None
-
-    try:
-        from fastmcp.server.auth import BearerTokenAuth  # type: ignore[import]
-    except ImportError as exc:
-        raise RuntimeError(
-            f"{MCP_TOKEN_ENV} is set, but FastMCP does not support auth. "
-            "Upgrade fastmcp to enable HTTP MCP auth."
-        ) from exc
-
-    return BearerTokenAuth(token=token)
-
 if _MCP_AVAILABLE:
+    
+    mcp_kwargs = {}
 
     auth_provider = _get_mcp_auth_provider()
-    mcp_kwargs = {"auth": auth_provider} if auth_provider is not None else {}
-
-    auth_provider = _get_mcp_auth_provider()
-    mcp_kwargs = {"auth": auth_provider} if auth_provider is not None else {}
+    if auth_provider is not None:
+        mcp_kwargs["auth"] = auth_provider
     mcp = FastMCP(
         "humane-proxy",
         **mcp_kwargs,
@@ -237,32 +218,14 @@ def serve() -> None:
 
     assert mcp is not None
     mcp.run()
-def serve_http(host: str = MCP_DEFAULT_HOST, port: int = 3000) -> None:
-    """Start the MCP server in Streamable HTTP mode.
 
 def serve_http(host: str = MCP_DEFAULT_HOST, port: int = 3000) -> None:
     """Start the MCP server in Streamable HTTP mode."""
 
-    Parameters
-    ----------
-    host:
-        Bind address (default ``"127.0.0.1"``).
-    port:
-        Bind port (default ``3000``).
-    """
     if not _MCP_AVAILABLE:
         raise RuntimeError(
             "MCP server requires fastmcp. Install with: pip install humane-proxy[mcp]"
         )
-    if _is_public_bind_host(host) and not os.environ.get(MCP_TOKEN_ENV, "").strip():
-        logger.warning(
-            "Starting HTTP MCP on public host %s without %s. "
-            "Set a bearer token before exposing this server beyond localhost.",
-            host,
-            MCP_TOKEN_ENV,
-        )
-    assert mcp is not None
-    mcp.run(transport="http", host=host, port=port)
 
     if _is_public_bind_host(host) and not os.environ.get(MCP_TOKEN_ENV, "").strip():
         logger.warning(
