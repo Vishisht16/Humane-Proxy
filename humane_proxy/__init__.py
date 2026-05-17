@@ -48,10 +48,6 @@ def load_config() -> dict:
 # ---------------------------------------------------------------------------
 # Plug-and-play public API
 # ---------------------------------------------------------------------------
-
-from humane_proxy.config import get_config as _get_config  # noqa: E402
-
-
 class HumaneProxy:
     """High-level, plug-and-play interface to the HumaneProxy safety pipeline.
 
@@ -124,10 +120,11 @@ class HumaneProxy:
                "stage_reached": int, ...}``
         """
         with self._span("humane_proxy.proxy.check") as span:
-            span.set_attribute(
-                "humane_proxy.session_id",
-                hashlib.sha256(session_id.encode("utf-8")).hexdigest(),
-            )
+            if span is not None: 
+                span.set_attribute(
+                    "humane_proxy.session_id",
+                    hashlib.sha256(session_id.encode("utf-8")).hexdigest(),
+                )
             result = self._pipeline.classify_sync(text, session_id)
         return result.to_dict()
 
@@ -141,10 +138,11 @@ class HumaneProxy:
             reasoning and higher accuracy.
         """
         with self._span("humane_proxy.proxy.check_async") as span:
-            span.set_attribute(
-                "humane_proxy.session_id",
-                hashlib.sha256(session_id.encode("utf-8")).hexdigest(),
-            )
+            if span is not None: 
+                span.set_attribute(
+                    "humane_proxy.session_id",
+                    hashlib.sha256(session_id.encode("utf-8")).hexdigest(),
+                )
             result = await self._pipeline.classify(text, session_id)
         return result.to_dict()
 

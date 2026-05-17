@@ -16,13 +16,18 @@ from typing import Any
 
 import pytest
 
-from opentelemetry import trace
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
-    InMemorySpanExporter,
-)
+opentelemetry = pytest.importorskip("opentelemetry")
+
+try:
+    from opentelemetry import trace
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+except ImportError:
+    pytest.skip("OpenTelemetry SDK not installed", allow_module_level=True)
 
 from humane_proxy import HumaneProxy
 from humane_proxy.classifiers.models import ClassificationResult
@@ -100,6 +105,11 @@ def make_config(enabled: bool = True) -> dict[str, Any]:
 
 
 def setup_inmemory_tracing():
+    """
+    Create a fresh in-memory OpenTelemetry provider/exporter
+    for deterministic isolated tests.
+    """
+
     exporter = InMemorySpanExporter()
 
     provider = TracerProvider(
@@ -111,17 +121,24 @@ def setup_inmemory_tracing():
     )
 
     processor = SimpleSpanProcessor(exporter)
-
     provider.add_span_processor(processor)
 
-    # The OpenTelemetry API only allows setting the tracer provider once.
-    # Reset the internal initialization guard in tests so the in-memory
-    # provider can be installed cleanly.
-    import opentelemetry.util._once as ot_once  # type: ignore
+    # ---------------------------------------------------------
+    # HARD RESET GLOBAL OTEL STATE
+    # ---------------------------------------------------------
 
-    trace._TRACER_PROVIDER_SET_ONCE = ot_once.Once()
-    trace._TRACER_PROVIDER = None
+    import opentelemetry.trace as trace_api
+    import opentelemetry.util._once as ot_once
 
+    # reset the "set once" guard
+    if hasattr(trace_api, "_TRACER_PROVIDER_SET_ONCE"):
+        trace_api._TRACER_PROVIDER_SET_ONCE = ot_once.Once()
+
+    # clear existing provider
+    if hasattr(trace_api, "_TRACER_PROVIDER"):
+        trace_api._TRACER_PROVIDER = None
+
+    # install fresh provider
     trace.set_tracer_provider(provider)
 
     return exporter

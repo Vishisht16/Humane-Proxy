@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import uuid
 import time
 from collections.abc import AsyncGenerator
@@ -202,7 +203,7 @@ def _authorize(request: Request) -> bool:
 
     token = auth.replace("Bearer ", "").strip()
 
-    return token == HUMANE_PROXY_API_KEY
+    return secrets.compare_digest(token, HUMANE_PROXY_API_KEY)
 
 @app.post("/chat")
 async def chat(request: Request) -> JSONResponse:
