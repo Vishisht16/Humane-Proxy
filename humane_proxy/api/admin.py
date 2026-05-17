@@ -19,6 +19,7 @@ Endpoints:
 from __future__ import annotations
 
 import csv
+import hmac
 import io
 import json
 import logging
@@ -60,7 +61,7 @@ def _require_admin(
                 "environment variable to enable it."
             ),
         )
-    if credentials is None or credentials.credentials != admin_key:
+    if credentials is None or not hmac.compare_digest(credentials.credentials, admin_key):
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing Bearer token.",
