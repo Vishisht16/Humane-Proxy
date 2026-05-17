@@ -9,7 +9,9 @@ from humane_proxy.risk.trajectory import (
     analyze,
     detect_spike,
     session_history,
+    snapshot,
     _category_history,
+    _last_spike_by_session,
     _weighted_mean,
 )
 from humane_proxy.classifiers.models import TrajectoryResult
@@ -135,6 +137,41 @@ class TestAnalyze:
         result = analyze(sid, 0.7, "criminal_intent")
         for s in result.window_scores:
             assert isinstance(s, float)
+
+    def test_snapshot_is_read_only(self):
+        sid = "snapshot-read-only-v3"
+        analyze(sid, 0.2, "safe")
+        analyze(sid, 0.8, "self_harm")
+
+        first = snapshot(sid)
+        second = snapshot(sid)
+
+        assert first.message_count == 2
+        assert second.message_count == 2
+        assert first.window_scores == [0.2, 0.8]
+        assert second.category_counts == {"safe": 1, "self_harm": 1}
+        assert len(session_history[sid]) == 2
+        assert len(_category_history[sid]) == 2
+
+    def test_snapshot_preserves_last_spike_state(self):
+        sid = "snapshot-spike-state-v3"
+        for _ in range(3):
+            analyze(sid, 0.1, "safe")
+        analyze(sid, 0.9, "self_harm")
+
+        result = snapshot(sid)
+
+        assert result.spike_detected is True
+        assert _last_spike_by_session[sid] is True
+
+    def test_snapshot_empty_session(self):
+        result = snapshot("snapshot-empty-v3")
+
+        assert result.spike_detected is False
+        assert result.trend == "stable"
+        assert result.window_scores == []
+        assert result.category_counts == {}
+        assert result.message_count == 0
 
 
 class TestTrendDetection:

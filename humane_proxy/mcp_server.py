@@ -8,9 +8,51 @@ Requires: pip install humane-proxy[mcp]
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import os
 
 logger = logging.getLogger("humane_proxy.mcp")
+
+MCP_TOKEN_ENV = "HUMANE_PROXY_ADMIN_KEY"
+MCP_DEFAULT_HOST = "127.0.0.1"
+
+
+def _is_public_bind_host(host: str) -> bool:
+    """Return whether an HTTP bind host may be reachable beyond localhost."""
+    normalized = (host or "").strip()
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+
+    if not normalized:
+        return True
+    if normalized.lower() == "localhost":
+        return False
+
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        return True
+
+    return not address.is_loopback
+
+
+def _get_mcp_auth_provider():
+    """Return a FastMCP Bearer auth provider when HTTP MCP auth is configured."""
+    token = os.environ.get(MCP_TOKEN_ENV, "").strip()
+    if not token:
+        return None
+
+    try:
+        from fastmcp.server.auth import BearerTokenAuth  # type: ignore[import]
+    except ImportError as exc:
+        raise RuntimeError(
+            f"{MCP_TOKEN_ENV} is set, but this FastMCP version does not expose "
+            "server Bearer token auth. Upgrade fastmcp to use HTTP MCP auth."
+        ) from exc
+
+    return BearerTokenAuth(token=token)
+
 
 try:
     from fastmcp import FastMCP  # type: ignore[import]
@@ -24,8 +66,11 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 if _MCP_AVAILABLE:
+    auth_provider = _get_mcp_auth_provider()
+    mcp_kwargs = {"auth": auth_provider} if auth_provider is not None else {}
     mcp = FastMCP(
-        "humane-proxy"
+        "humane-proxy",
+        **mcp_kwargs,
     )
 
     @mcp.tool()
@@ -71,17 +116,9 @@ if _MCP_AVAILABLE:
             ``{"spike_detected": bool, "trend": str, "window_scores": list,
                "category_counts": dict, "message_count": int}``
         """
-        from humane_proxy.risk.trajectory import analyze
+        from humane_proxy.risk.trajectory import snapshot, to_dict
 
-        # Analyze with a neutral message to get current state.
-        result = analyze(session_id, 0.0, "safe")
-        return {
-            "spike_detected": result.spike_detected,
-            "trend": result.trend,
-            "window_scores": result.window_scores,
-            "category_counts": result.category_counts,
-            "message_count": result.message_count,
-        }
+        return to_dict(snapshot(session_id))
 
     @mcp.tool()
     async def list_recent_escalations(
@@ -105,7 +142,10 @@ if _MCP_AVAILABLE:
         """
         import json
         import sqlite3
+        from humane_proxy.escalation.query import normalize_escalation_query
         from humane_proxy.escalation.local_db import _get_db_path
+
+        limit, category = normalize_escalation_query(limit, category)
 
         conn = sqlite3.connect(_get_db_path(), check_same_thread=False)
         try:
@@ -148,7 +188,7 @@ def serve() -> None:
     mcp.run()
 
 
-def serve_http(host: str = "0.0.0.0", port: int = 3000) -> None:
+def serve_http(host: str = MCP_DEFAULT_HOST, port: int = 3000) -> None:
     """Start the MCP server in Streamable HTTP mode.
 
     This exposes the MCP tools over HTTP, making the server compatible
@@ -158,13 +198,20 @@ def serve_http(host: str = "0.0.0.0", port: int = 3000) -> None:
     Parameters
     ----------
     host:
-        Bind address (default ``"0.0.0.0"``).
+        Bind address (default ``"127.0.0.1"``).
     port:
         Bind port (default ``3000``).
     """
     if not _MCP_AVAILABLE:
         raise RuntimeError(
             "MCP server requires fastmcp. Install with: pip install humane-proxy[mcp]"
+        )
+    if _is_public_bind_host(host) and not os.environ.get(MCP_TOKEN_ENV, "").strip():
+        logger.warning(
+            "Starting HTTP MCP on public host %s without %s. "
+            "Set a bearer token before exposing this server beyond localhost.",
+            host,
+            MCP_TOKEN_ENV,
         )
     assert mcp is not None
     mcp.run(transport="http", host=host, port=port)

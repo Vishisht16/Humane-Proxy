@@ -555,13 +555,14 @@ def benchmark(dataset: str, ci: bool, stages: str) -> None:
 @click.option("--transport", "-t", default="stdio",
               type=click.Choice(["stdio", "http"]),
               help="Transport mode: stdio (default) or http")
-@click.option("--host", default="0.0.0.0", help="HTTP bind host (default: 0.0.0.0)")
+@click.option("--host", default="127.0.0.1", help="HTTP bind host (default: 127.0.0.1)")
 @click.option("--port", "-p", default=3000, type=int, help="HTTP bind port (default: 3000)")
 def mcp_serve(transport: str, host: str, port: int) -> None:
     """Start the MCP server (requires [mcp] extra).
 
     Use --transport stdio (default) for local integration with agents.
-    Use --transport http for remote access and registry listing.
+    Use --transport http for HTTP access. Set HUMANE_PROXY_ADMIN_KEY
+    before exposing HTTP MCP beyond localhost.
     """
     try:
         if transport == "http":
