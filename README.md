@@ -88,6 +88,14 @@ Or add it directly to your Claude Desktop config (`claude_desktop_config.json`):
 
 This exposes 3 tools to your AI agent: `check_message_safety`, `get_session_risk`, and `list_recent_escalations`.
 
+For HTTP MCP, the server binds to `127.0.0.1` by default. If you expose it
+beyond localhost, set a bearer token first:
+
+```bash
+export HUMANE_PROXY_ADMIN_KEY=your-secret-token
+humane-proxy mcp-serve --transport http --host 0.0.0.0 --port 3000
+```
+
 ---
 
 ## Available On
@@ -441,16 +449,27 @@ curl -X DELETE http://localhost:8000/admin/sessions/user-42 \
 ```bash
 pip install humane-proxy[mcp]
 humane-proxy mcp-serve                         # stdio (default)
-humane-proxy mcp-serve --transport http --port 3000  # HTTP
+humane-proxy mcp-serve --transport http --port 3000  # HTTP on 127.0.0.1
 ```
+
+HTTP MCP is local-only by default. To bind publicly, pass `--host 0.0.0.0`
+explicitly and protect tool access with a bearer token:
+
+```bash
+export HUMANE_PROXY_ADMIN_KEY=your-secret-token
+humane-proxy mcp-serve --transport http --host 0.0.0.0 --port 3000
+```
+
+Clients must send `Authorization: Bearer your-secret-token` when the token is
+configured. Leave `HUMANE_PROXY_ADMIN_KEY` unset for stdio/local-only MCP.
 
 Exposes three tools via Model Context Protocol:
 
 | Tool | Description |
 |---|---|
 | `check_message_safety` | Full pipeline classification |
-| `get_session_risk` | Session trajectory (trend, spike, category counts) |
-| `list_recent_escalations` | Audit log query |
+| `get_session_risk` | Read-only session trajectory snapshot (trend, spike, category counts) |
+| `list_recent_escalations` | Bounded audit log query |
 
 Available on the [Official MCP Registry](https://registry.modelcontextprotocol.io).
 

@@ -56,16 +56,9 @@ def _get_session_risk(session_id: str) -> dict:
     dict
         ``{"spike_detected": bool, "trend": str, "window_scores": list, ...}``
     """
-    from humane_proxy.risk.trajectory import analyze
+    from humane_proxy.risk.trajectory import snapshot, to_dict
 
-    result = analyze(session_id, 0.0, "safe")
-    return {
-        "spike_detected": result.spike_detected,
-        "trend": result.trend,
-        "window_scores": result.window_scores,
-        "category_counts": result.category_counts,
-        "message_count": result.message_count,
-    }
+    return to_dict(snapshot(session_id))
 
 
 def _list_recent_escalations(limit: int = 20, category: str | None = None) -> list[dict]:
@@ -83,8 +76,10 @@ def _list_recent_escalations(limit: int = 20, category: str | None = None) -> li
     list[dict]
         List of escalation records.
     """
+    from humane_proxy.escalation.query import normalize_escalation_query
     from humane_proxy.storage.factory import get_store
 
+    limit, category = normalize_escalation_query(limit, category)
     store = get_store()
     return store.query(category=category, limit=limit)
 
