@@ -56,6 +56,7 @@ def _get_mcp_auth_provider():
 
 try:
     from fastmcp import FastMCP  # type: ignore[import]
+
     _MCP_AVAILABLE = True
 except ImportError:
     _MCP_AVAILABLE = False
@@ -64,6 +65,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # MCP app instance
 # ---------------------------------------------------------------------------
+
 
 def _init_telemetry() -> None:
     """Initialize OpenTelemetry for MCP server execution."""
@@ -76,7 +78,6 @@ def _init_telemetry() -> None:
 if _MCP_AVAILABLE:
     
     mcp_kwargs = {}
-
     auth_provider = _get_mcp_auth_provider()
     if auth_provider is not None:
         mcp_kwargs["auth"] = auth_provider
@@ -174,8 +175,17 @@ if _MCP_AVAILABLE:
         finally:
             conn.close()
 
-        cols = ["id", "session_id", "category", "risk_score", "triggers",
-                "timestamp", "message_hash", "stage_reached", "reasoning"]
+        cols = [
+            "id",
+            "session_id",
+            "category",
+            "risk_score",
+            "triggers",
+            "timestamp",
+            "message_hash",
+            "stage_reached",
+            "reasoning",
+        ]
         result = []
         for row in rows:
             rec = dict(zip(cols, row))
@@ -189,24 +199,6 @@ if _MCP_AVAILABLE:
 else:
     mcp = None  # type: ignore[assignment]
 
-def _is_public_bind_host(host: str) -> bool:
-    normalized = (host or "").strip()
-
-    if normalized.startswith("[") and normalized.endswith("]"):
-        normalized = normalized[1:-1]
-
-    if not normalized:
-        return True
-    if normalized.lower() == "localhost":
-        return False
-
-    try:
-        ip = ipaddress.ip_address(normalized)
-    except ValueError:
-        return True
-
-    return not ip.is_loopback
-
 def serve() -> None:
     """Start the MCP server in stdio mode (called by `humane-proxy mcp-serve`)."""
     if not _MCP_AVAILABLE:
@@ -218,6 +210,7 @@ def serve() -> None:
 
     assert mcp is not None
     mcp.run()
+
 
 def serve_http(host: str = MCP_DEFAULT_HOST, port: int = 3000) -> None:
     """Start the MCP server in Streamable HTTP mode."""
