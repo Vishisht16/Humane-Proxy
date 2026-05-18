@@ -42,6 +42,7 @@ _MAX_SESSIONS: int = 1000
 # Each entry is (score, timestamp_seconds).
 session_history: dict[str, deque[tuple[float, float]]] = {}
 _category_history: dict[str, deque[str]] = {}
+_last_spike_by_session: dict[str, bool] = {}
 
 
 def _evict_oldest_sessions() -> None:
@@ -55,6 +56,7 @@ def _evict_oldest_sessions() -> None:
         oldest_key = next(iter(session_history))
         del session_history[oldest_key]
         _category_history.pop(oldest_key, None)
+        _last_spike_by_session.pop(oldest_key, None)
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +85,30 @@ def _weighted_mean(history: deque[tuple[float, float]], now: float) -> float:
         total_weight += w
 
     return weighted_sum / total_weight if total_weight > 0 else 0.0
+
+
+def _trend_for_scores(scores: list[float]) -> str:
+    """Return the trend label for a list of recent raw scores."""
+    if len(scores) < 4:
+        return "stable"
+
+    mid = len(scores) // 2
+    first_half_avg = sum(scores[:mid]) / mid
+    second_half_avg = sum(scores[mid:]) / (len(scores) - mid)
+    trend_delta = second_half_avg - first_half_avg
+    if trend_delta > 0.15:
+        return "escalating"
+    if trend_delta < -0.15:
+        return "declining"
+    return "stable"
+
+
+def _category_counts(session_id: str) -> dict[str, int]:
+    """Return the category distribution for a tracked session."""
+    cat_counts: dict[str, int] = {}
+    for c in _category_history.get(session_id, []):
+        cat_counts[c] = cat_counts.get(c, 0) + 1
+    return cat_counts
 
 
 def detect_spike(session_id: str, current_score: float) -> bool:
@@ -169,6 +195,7 @@ def analyze(
     """
     # Run spike detection (this also appends the score to session_history).
     spike = detect_spike(session_id, score)
+    _last_spike_by_session[session_id] = spike
 
     # Track category history.
     if session_id not in _category_history:
@@ -179,27 +206,35 @@ def analyze(
     history = session_history.get(session_id, deque())
     scores = [s for s, _ in history]
 
-    # Trend detection: compare first half vs second half of the window.
-    trend = "stable"
-    if len(scores) >= 4:
-        mid = len(scores) // 2
-        first_half_avg = sum(scores[:mid]) / mid
-        second_half_avg = sum(scores[mid:]) / (len(scores) - mid)
-        trend_delta = second_half_avg - first_half_avg
-        if trend_delta > 0.15:
-            trend = "escalating"
-        elif trend_delta < -0.15:
-            trend = "declining"
-
-    # Category distribution.
-    cat_counts: dict[str, int] = {}
-    for c in _category_history.get(session_id, []):
-        cat_counts[c] = cat_counts.get(c, 0) + 1
-
     return TrajectoryResult(
         spike_detected=spike,
-        trend=trend,
+        trend=_trend_for_scores(scores),
         window_scores=scores,
-        category_counts=cat_counts,
+        category_counts=_category_counts(session_id),
         message_count=len(scores),
     )
+
+
+def snapshot(session_id: str) -> TrajectoryResult:
+    """Return the current trajectory state without recording a new event."""
+    history = session_history.get(session_id, deque())
+    scores = [s for s, _ in history]
+
+    return TrajectoryResult(
+        spike_detected=_last_spike_by_session.get(session_id, False),
+        trend=_trend_for_scores(scores),
+        window_scores=scores,
+        category_counts=_category_counts(session_id),
+        message_count=len(scores),
+    )
+
+
+def to_dict(result: TrajectoryResult) -> dict:
+    """Serialize a trajectory result for MCP and agent integrations."""
+    return {
+        "spike_detected": result.spike_detected,
+        "trend": result.trend,
+        "window_scores": result.window_scores,
+        "category_counts": result.category_counts,
+        "message_count": result.message_count,
+    }

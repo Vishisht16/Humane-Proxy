@@ -59,16 +59,9 @@ def get_session_risk(session_id: str) -> str:
     Returns:
         JSON string with spike detection, trend, and category distribution.
     """
-    from humane_proxy.risk.trajectory import analyze
+    from humane_proxy.risk.trajectory import snapshot, to_dict
 
-    result = analyze(session_id, 0.0, "safe")
-    return json.dumps({
-        "spike_detected": result.spike_detected,
-        "trend": result.trend,
-        "window_scores": result.window_scores,
-        "category_counts": result.category_counts,
-        "message_count": result.message_count,
-    }, indent=2)
+    return json.dumps(to_dict(snapshot(session_id)), indent=2)
 
 
 def list_recent_escalations(limit: int = 20, category: str = "") -> str:
@@ -81,11 +74,13 @@ def list_recent_escalations(limit: int = 20, category: str = "") -> str:
     Returns:
         JSON string with list of escalation records.
     """
+    from humane_proxy.escalation.query import normalize_escalation_query
     from humane_proxy.storage.factory import get_store
 
+    limit, category = normalize_escalation_query(limit, category)
     store = get_store()
     results = store.query(
-        category=category if category else None,
+        category=category,
         limit=limit,
     )
     return json.dumps(results, indent=2, default=str)

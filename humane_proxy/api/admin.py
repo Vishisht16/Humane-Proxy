@@ -28,7 +28,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -298,32 +298,21 @@ def get_session_risk(
     finally:
         conn.close()
 
-    from humane_proxy.risk.trajectory import analyze
+    from humane_proxy.risk.trajectory import snapshot
 
-    # Build trajectory by replaying each escalation.
-    trajectory = None
-    for row in rows:
-        rec = _row_to_dict(row)
-        trajectory = analyze(
-            session_id + "_admin_replay",  # isolated session key
-            rec["risk_score"],
-            rec.get("category", "safe"),
-        )
+    trajectory = snapshot(session_id)
 
     return {
         "session_id": session_id,
         "escalation_count": len(rows),
         "history": [_row_to_dict(r) for r in rows],
-        "trajectory": (
-            {
-                "spike_detected": trajectory.spike_detected,
-                "trend": trajectory.trend,
-                "window_scores": trajectory.window_scores,
-                "category_counts": trajectory.category_counts,
-            }
-            if trajectory
-            else None
-        ),
+        "trajectory": {
+            "spike_detected": trajectory.spike_detected,
+            "trend": trajectory.trend,
+            "window_scores": trajectory.window_scores,
+            "category_counts": trajectory.category_counts,
+            "message_count": trajectory.message_count,
+        },
     }
 
 
@@ -381,11 +370,11 @@ def get_stats(_: str = Depends(_require_admin)) -> dict:
     }
 
 
-@router.delete("/sessions/{session_id}", status_code=204)
+@router.delete("/sessions/{session_id}", status_code=204, response_class=Response)
 def delete_session_data(
     session_id: str,
     _: str = Depends(_require_admin),
-) -> None:
+) -> Response:
     """Delete all escalation records for a session (privacy right to erasure)."""
     conn = _get_conn()
     try:
@@ -397,3 +386,4 @@ def delete_session_data(
         conn.close()
 
     logger.info("Deleted %d records for session %s (admin request)", deleted, session_id)
+    return Response(status_code=204)
