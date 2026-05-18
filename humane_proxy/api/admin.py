@@ -13,6 +13,7 @@ Endpoints:
   GET  /admin/escalations/{id}     — single record
   GET  /admin/sessions/{id}/risk   — per-session trajectory
   GET  /admin/stats                — aggregate counts
+  GET  /admin/analytics/top-triggers — aggregate trigger frequencies
   DELETE /admin/sessions/{id}      — delete session data (privacy)
 """
 
@@ -25,7 +26,8 @@ import logging
 import os
 import sqlite3
 import time
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -301,11 +303,42 @@ def get_session_risk(
     from humane_proxy.risk.trajectory import snapshot
 
     trajectory = snapshot(session_id)
+    history = [_row_to_dict(r) for r in rows]
+
+    peak_risk_score = None
+    peak_risk_timestamp = None
+    category_transitions = []
+    
+    if history:
+        # Initialize with the first item to avoid iterating against it
+        first_item = history[0]
+        peak_risk_score = first_item.get("risk_score")
+        peak_risk_timestamp = first_item.get("timestamp")
+        last_category = first_item.get("category")
+        
+        for r in history[1:]:
+            score = r.get("risk_score")
+            if score is not None:
+                if peak_risk_score is None or score > peak_risk_score:
+                    peak_risk_score = score
+                    peak_risk_timestamp = r.get("timestamp")
+
+            cat = r.get("category")
+            if cat and last_category and cat != last_category:
+                category_transitions.append({
+                    "from": last_category,
+                    "to": cat,
+                    "timestamp": r.get("timestamp")
+                })
+                last_category = cat
 
     return {
         "session_id": session_id,
         "escalation_count": len(rows),
-        "history": [_row_to_dict(r) for r in rows],
+        "peak_risk_score": peak_risk_score,
+        "peak_risk_timestamp": peak_risk_timestamp,
+        "category_transitions": category_transitions,
+        "history": history,
         "trajectory": {
             "spike_detected": trajectory.spike_detected,
             "trend": trajectory.trend,
@@ -322,7 +355,7 @@ def get_stats(_: str = Depends(_require_admin)) -> dict:
     conn = _get_conn()
     try:
         total = conn.execute("SELECT COUNT(*) FROM escalations").fetchone()[0]
-        by_category = conn.execute(
+        by_category_rows = conn.execute(
             "SELECT category, COUNT(*) FROM escalations GROUP BY category"
         ).fetchall()
         by_day = conn.execute(
@@ -352,12 +385,45 @@ def get_stats(_: str = Depends(_require_admin)) -> dict:
                GROUP BY hour ORDER BY hour""",
             (cutoff_24h,),
         ).fetchall()
+        
+        now_dt = datetime.now(timezone.utc)
+        current_week_start_dt = now_dt.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) - timedelta(days=now_dt.weekday())
+        
+        current_week_start = current_week_start_dt.timestamp()
+        previous_week_start = (current_week_start_dt - timedelta(days=7)).timestamp()
+        now_ts = now_dt.timestamp()
+        
+        current_week_count = conn.execute(
+            "SELECT COUNT(*) FROM escalations WHERE timestamp >= ? AND timestamp <= ?",
+            (current_week_start, now_ts)
+        ).fetchone()[0]
+        
+        previous_week_count = conn.execute(
+            "SELECT COUNT(*) FROM escalations WHERE timestamp >= ? AND timestamp < ?",
+            (previous_week_start, current_week_start)
+        ).fetchone()[0]
+
     finally:
         conn.close()
+        
+    by_category_dict = dict(by_category_rows)
+    
+    # New: category_percentages
+    category_percentages = {}
+    if total > 0:
+        for cat, count in by_category_dict.items():
+            category_percentages[cat] = round((count / total) * 100, 1)
 
     return {
         "total_escalations": total,
-        "by_category": dict(by_category),
+        "by_category": by_category_dict,
+        "category_percentages": category_percentages,
+        "period_comparison": {
+            "current_week": current_week_count,
+            "previous_week": previous_week_count,
+        },
         "by_day": dict(by_day),
         "average_risk_score": round(avg_score or 0.0, 3),
         "top_sessions": [
@@ -368,6 +434,55 @@ def get_stats(_: str = Depends(_require_admin)) -> dict:
         "hourly_last_24h": dict(hourly),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Analytics Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/analytics/top-triggers")
+def get_top_triggers(
+    limit: int = Query(10, ge=1, le=100),
+    category: str | None = Query(None, description="Filter by category"),
+    _: str = Depends(_require_admin)
+) -> dict:
+    """Aggregate all escalation trigger keywords and rank them by frequency."""
+    conn = _get_conn()
+    clauses: list[str] = []
+    params: list[Any] = []
+
+    if category:
+        clauses.append("category = ?")
+        params.append(category)
+        
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    try:
+        rows = conn.execute(
+            f"SELECT triggers FROM escalations {where}", params
+        ).fetchall()
+    finally:
+        conn.close()
+
+    trigger_counter: Counter[str] = Counter()
+    for (triggers_raw,) in rows:
+        if not triggers_raw:
+            continue
+        try:
+            parsed = json.loads(triggers_raw)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, str):
+                        trigger_counter[item.strip().lower()] += 1
+        except (json.JSONDecodeError, TypeError):
+            continue
+            
+    top_triggers = [
+        {"trigger": trigger, "count": count} 
+        for trigger, count in trigger_counter.most_common(limit)
+    ]
+
+    return {"top_triggers": top_triggers}
 
 
 @router.delete("/sessions/{session_id}", status_code=204, response_class=Response)
