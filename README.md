@@ -17,25 +17,30 @@ HumaneProxy sits between your users and any LLM. When someone expresses self-har
 
 ## What it does
 
+## Architecture Diagram
+
+```mermaid
 flowchart TD
-    A([👤 User Message]) --> B([🛡️ HumaneProxy])
+    A([👤 User Request])
 
-    B -->|✅ Safe| C([🤖 Upstream LLM])
-    C --> D([💬 Response to User])
+    A --> B{{🟦 Stage 1 — Heuristics<br/>Keyword corpus + regex<br/>< 1ms}}
 
-    B -->|⚠️ self_harm / criminal_intent| E([❤️ Empathetic Care Response])
-    E --> F([📡 Operator Alert])
+    B -->|Definitive harmful intent| X([🛑 Block Request])
+    B -->|Clearly safe| Y([✅ Forward to LLM])
+    B -->|Ambiguous| C{{🟨 Stage 2 — Semantic Embeddings<br/>Cosine similarity<br/>~100ms}}
 
-    %% Styles
-    classDef proxy fill:#e6f0ff,stroke:#3366cc,stroke-width:2px,color:#000;
-    classDef safe fill:#e5ffe5,stroke:#22aa22,stroke-width:2px,color:#000;
-    classDef danger fill:#ffe5e5,stroke:#ff3333,stroke-width:2px,color:#000;
-    classDef alert fill:#fff4cc,stroke:#e6b800,stroke-width:2px,color:#000;
+    C -->|High confidence harmful| X
+    C -->|Clearly safe| Y
+    C -->|Still ambiguous| D{{🟪 Stage 3 — Reasoning LLM<br/>LlamaGuard / OpenAI Moderation<br/>~1–3s}}
 
-    class B proxy;
-    class C,D safe;
-    class E danger;
-    class F alert;
+    D -->|Unsafe| X
+    D -->|Safe| Y
+
+    X -.-> E[(🗄️ DB Logging)]
+    Y -.-> E
+
+    X -.-> F[[📡 Async Webhook Dispatch]]
+    Y -.-> F
 ```
 
 - 🆘 **Self-harm detected** → Blocked with international crisis resources. Operator notified.
@@ -116,7 +121,7 @@ This exposes 3 tools to your AI agent: `check_message_safety`, `get_session_risk
 ## 3-Stage Cascade Pipeline
 
 HumaneProxy classifies every message through up to **3 stages**, each progressively more capable but also more expensive.
-
+```mermaid
 flowchart TD
     A([👤 User Request])
 
@@ -158,6 +163,7 @@ flowchart TD
     class Y allow;
 
     class E,F async;
+```
 
 ### Configuring the Pipeline
 
