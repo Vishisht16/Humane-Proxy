@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from humane_proxy.errors import SessionOwnershipError
 from humane_proxy.storage.base import EscalationStore
 
 logger = logging.getLogger("humane_proxy.storage.redis")
@@ -68,6 +69,24 @@ class RedisStore(EscalationStore):
         # Redis is schemaless — just verify connectivity.
         self._client.ping()
         logger.info("Redis store connected: %s", self._client.connection_pool.connection_kwargs.get("host", ""))
+
+    def get_session_owner(self, session_id: str) -> str | None:
+        value = self._client.get(self._key("owner", session_id))
+        return value or None
+
+    def set_session_owner(self, session_id: str, owner_token: str) -> None:
+        # First writer wins.
+        self._client.set(self._key("owner", session_id), owner_token, nx=True)
+
+    def assert_session_owner(self, session_id: str, owner_token: str) -> None:
+        owner_key = self._key("owner", session_id)
+        # First writer wins (SET NX). If it already exists, we verify.
+        self._client.set(owner_key, owner_token, nx=True)
+        existing = self._client.get(owner_key)
+        if existing and existing != owner_token:
+            raise SessionOwnershipError(
+                f"session_id '{session_id}' belongs to a different caller"
+            )
 
     def log(
         self,
@@ -144,12 +163,14 @@ class RedisStore(EscalationStore):
     def delete_session(self, session_id: str) -> int:
         ids = self._client.zrange(self._key("session", session_id), 0, -1)
         if not ids:
+            self._client.delete(self._key("owner", session_id))
             return 0
         pipe = self._client.pipeline()
         for esc_id in ids:
             pipe.delete(self._key("esc", esc_id))
             pipe.zrem(self._key("esc_timeline"), esc_id)
         pipe.delete(self._key("session", session_id))
+        pipe.delete(self._key("owner", session_id))
         pipe.execute()
         return len(ids)
 

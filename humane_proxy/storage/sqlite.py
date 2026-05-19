@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from humane_proxy.errors import SessionOwnershipError
 from humane_proxy.storage.base import EscalationStore
 
 logger = logging.getLogger("humane_proxy.storage.sqlite")
@@ -58,6 +59,15 @@ class SQLiteStore(EscalationStore):
             with conn:
                 conn.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS sessions (
+                        session_id   TEXT PRIMARY KEY,
+                        owner_token  TEXT NOT NULL,
+                        created_at   REAL NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS escalations (
                         id             INTEGER PRIMARY KEY AUTOINCREMENT,
                         session_id     TEXT    NOT NULL,
@@ -90,6 +100,58 @@ class SQLiteStore(EscalationStore):
         finally:
             conn.close()
         logger.info("SQLite store initialised at %s", self._db_path)
+
+    def get_session_owner(self, session_id: str) -> str | None:
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                "SELECT owner_token FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None
+
+    def set_session_owner(self, session_id: str, owner_token: str) -> None:
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO sessions (session_id, owner_token, created_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(session_id) DO NOTHING
+                    """,
+                    (session_id, owner_token, datetime.now(timezone.utc).timestamp()),
+                )
+        finally:
+            conn.close()
+
+    def assert_session_owner(self, session_id: str, owner_token: str) -> None:
+        conn = self._conn()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO sessions (session_id, owner_token, created_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(session_id) DO NOTHING
+                    """,
+                    (session_id, owner_token, datetime.now(timezone.utc).timestamp()),
+                )
+                row = conn.execute(
+                    "SELECT owner_token FROM sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                existing = row[0] if row else None
+                if existing is None:
+                    return
+                if existing != owner_token:
+                    raise SessionOwnershipError(
+                        f"session_id '{session_id}' belongs to a different caller"
+                    )
+        finally:
+            conn.close()
 
     def log(
         self,
@@ -176,9 +238,11 @@ class SQLiteStore(EscalationStore):
         conn = self._conn()
         try:
             with conn:
-                return conn.execute(
+                deleted = conn.execute(
                     "DELETE FROM escalations WHERE session_id = ?", (session_id,)
                 ).rowcount
+                conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+                return deleted
         finally:
             conn.close()
 

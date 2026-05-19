@@ -40,10 +40,13 @@ def init_db() -> None:
     logger.info("Escalation storage initialised (backend: %s)", type(store).__name__)
 
 
-def check_rate_limit(session_id: str) -> bool:
+def check_rate_limit(session_id: str, owner_token: str | None = None) -> bool:
     """Return ``True`` if the session is **within** its allowed quota."""
     from humane_proxy.storage.factory import get_store
-    return get_store().check_rate_limit(session_id)
+    store = get_store()
+    if owner_token is not None:
+        store.assert_session_owner(session_id, owner_token)
+    return store.check_rate_limit(session_id)
 
 
 def log_escalation(
@@ -54,10 +57,14 @@ def log_escalation(
     message_hash: str | None = None,
     stage_reached: int = 1,
     reasoning: str | None = None,
+    owner_token: str | None = None,
 ) -> None:
     """Persist an escalation event to the configured backend."""
     from humane_proxy.storage.factory import get_store
-    get_store().log(
+    store = get_store()
+    if owner_token is not None:
+        store.assert_session_owner(session_id, owner_token)
+    store.log(
         session_id=session_id,
         category=category,
         risk_score=risk_score,

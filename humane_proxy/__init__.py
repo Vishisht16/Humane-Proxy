@@ -89,7 +89,13 @@ class HumaneProxy:
         """Return the underlying SafetyPipeline instance."""
         return self._pipeline
 
-    def check(self, text: str, session_id: str = "programmatic") -> dict:
+    def check(
+        self,
+        text: str,
+        session_id: str = "programmatic",
+        *,
+        owner_token: str | None = None,
+    ) -> dict:
         """Run the synchronous safety pipeline on *text* (Stages 1+2).
 
         Returns
@@ -98,10 +104,19 @@ class HumaneProxy:
             ``{"safe": bool, "category": str, "score": float, "triggers": list,
                "stage_reached": int, ...}``
         """
+        if owner_token is not None:
+            from humane_proxy.storage.factory import get_store
+            get_store().assert_session_owner(session_id, owner_token)
         result = self._pipeline.classify_sync(text, session_id)
         return result.to_dict()
 
-    async def check_async(self, text: str, session_id: str = "programmatic") -> dict:
+    async def check_async(
+        self,
+        text: str,
+        session_id: str = "programmatic",
+        *,
+        owner_token: str | None = None,
+    ) -> dict:
         """Run the full async safety pipeline on *text* (all 3 stages).
 
         Returns
@@ -110,6 +125,9 @@ class HumaneProxy:
             Same as :meth:`check`, but potentially enriched with Stage-3
             reasoning and higher accuracy.
         """
+        if owner_token is not None:
+            from humane_proxy.storage.factory import get_store
+            get_store().assert_session_owner(session_id, owner_token)
         result = await self._pipeline.classify(text, session_id)
         return result.to_dict()
 

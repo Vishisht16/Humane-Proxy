@@ -77,6 +77,7 @@ if _MCP_AVAILABLE:
     async def check_message_safety(
         message: str,
         session_id: str = "mcp-default",
+        owner_token: str | None = None,
     ) -> dict:
         """Classify a message for self-harm or criminal intent.
 
@@ -98,6 +99,9 @@ if _MCP_AVAILABLE:
 
         config = get_config()
         pipeline = SafetyPipeline(config)
+        if owner_token is not None:
+            from humane_proxy.storage.factory import get_store
+            get_store().assert_session_owner(session_id, owner_token)
         result = await pipeline.classify(message, session_id)
         return result.to_dict()
 

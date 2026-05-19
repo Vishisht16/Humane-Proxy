@@ -133,6 +133,7 @@ def escalate(
     message_hash: str | None = None,
     stage_reached: int = 1,
     reasoning: str | None = None,
+    owner_token: str | None = None,
 ) -> dict:
     """Handle a flagged interaction.
 
@@ -167,7 +168,7 @@ def escalate(
     triggers = triggers or []
 
     # --- Rate-limit gate ---
-    if not check_rate_limit(session_id):
+    if not check_rate_limit(session_id, owner_token=owner_token):
         logger.warning(
             "[RATE-LIMITED] session=%s  category=%s  risk_score=%.2f — suppressed (quota exhausted)",
             session_id, category, risk_score,
@@ -186,6 +187,7 @@ def escalate(
             message_hash=message_hash,
             stage_reached=stage_reached,
             reasoning=reasoning,
+            owner_token=owner_token,
         )
     except Exception:
         logger.exception("Failed to write escalation to DB for session=%s", session_id)

@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from humane_proxy.errors import SessionOwnershipError
 from humane_proxy.storage.base import EscalationStore
 
 logger = logging.getLogger("humane_proxy.storage.postgres")
@@ -61,6 +62,15 @@ class PostgresStore(EscalationStore):
         with self._conn() as conn:
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id    TEXT PRIMARY KEY,
+                    owner_token   TEXT NOT NULL,
+                    created_at    DOUBLE PRECISION NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS escalations (
                     id             SERIAL PRIMARY KEY,
                     session_id     TEXT    NOT NULL,
@@ -82,6 +92,51 @@ class PostgresStore(EscalationStore):
             )
             conn.commit()
         logger.info("PostgreSQL store initialised: %s", self._dsn.split("@")[-1] if "@" in self._dsn else "(local)")
+
+    def get_session_owner(self, session_id: str) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT owner_token FROM sessions WHERE session_id = %s",
+                (session_id,),
+            ).fetchone()
+        return row["owner_token"] if row else None
+
+    def set_session_owner(self, session_id: str, owner_token: str) -> None:
+        ts = datetime.now(timezone.utc).timestamp()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (session_id, owner_token, created_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (session_id) DO NOTHING
+                """,
+                (session_id, owner_token, ts),
+            )
+            conn.commit()
+
+    def assert_session_owner(self, session_id: str, owner_token: str) -> None:
+        ts = datetime.now(timezone.utc).timestamp()
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (session_id, owner_token, created_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (session_id) DO NOTHING
+                """,
+                (session_id, owner_token, ts),
+            )
+            row = conn.execute(
+                "SELECT owner_token FROM sessions WHERE session_id = %s",
+                (session_id,),
+            ).fetchone()
+            conn.commit()
+        existing = row["owner_token"] if row else None
+        if existing is None:
+            return
+        if existing != owner_token:
+            raise SessionOwnershipError(
+                f"session_id '{session_id}' belongs to a different caller"
+            )
 
     def log(
         self,
@@ -158,6 +213,7 @@ class PostgresStore(EscalationStore):
             cur = conn.execute(
                 "DELETE FROM escalations WHERE session_id = %s", (session_id,)
             )
+            conn.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
             conn.commit()
             return cur.rowcount
 

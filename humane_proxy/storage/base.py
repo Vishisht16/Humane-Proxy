@@ -19,6 +19,25 @@ class EscalationStore(ABC):
         ...
 
     @abstractmethod
+    def get_session_owner(self, session_id: str) -> str | None:
+        """Return the owner token for a session, or ``None`` if unknown."""
+        ...
+
+    @abstractmethod
+    def set_session_owner(self, session_id: str, owner_token: str) -> None:
+        """Bind a session to an owner token (first write wins)."""
+        ...
+
+    @abstractmethod
+    def assert_session_owner(self, session_id: str, owner_token: str) -> None:
+        """Ensure ``session_id`` is owned by ``owner_token``.
+
+        Implementations should persist the first seen owner token for a new
+        session and reject subsequent mismatches.
+        """
+        ...
+
+    @abstractmethod
     def log(
         self,
         session_id: str,

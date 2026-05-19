@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
+import hmac
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -12,6 +14,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from humane_proxy.errors import SessionOwnershipError
 from humane_proxy.escalation.local_db import init_db
 from humane_proxy.escalation.router import escalate, get_self_harm_response
 
@@ -62,6 +65,22 @@ def _resolve_session_id(payload: dict[str, Any], request: Request) -> str:
         request.client.host if request.client else "unknown"
     )
 
+def _owner_token_for_request(request: Request) -> str:
+    """Derive a stable per-caller owner token for session binding.
+
+    Uses ``HUMANE_PROXY_SESSION_SECRET`` when set for HMAC hardening.
+    Falls back to a deterministic hash of the client IP to avoid storing
+    raw IPs in the session ownership table.
+    """
+    ip = request.client.host if request.client else "unknown"
+    secret = os.environ.get("HUMANE_PROXY_SESSION_SECRET", "").encode("utf-8")
+    ip_bytes = ip.encode("utf-8")
+    if secret:
+        digest = hmac.new(secret, ip_bytes, hashlib.sha256).hexdigest()
+        return f"hmac:{digest}"
+    digest = hashlib.sha256(ip_bytes).hexdigest()
+    return f"ip:{digest}"
+
 
 def _extract_last_user_message(payload: dict[str, Any]) -> str:
     messages: list[dict[str, str]] = payload.get("messages", [])
@@ -77,12 +96,23 @@ async def chat(request: Request) -> JSONResponse:
     payload: dict[str, Any] = await request.json()
 
     session_id = _resolve_session_id(payload, request)
+    owner_token = _owner_token_for_request(request)
     user_message = _extract_last_user_message(payload)
 
     if not user_message:
         return JSONResponse(
             status_code=400,
             content={"status": "error", "message": "No user message found in payload."},
+        )
+
+    from humane_proxy.storage.factory import get_store
+
+    try:
+        get_store().assert_session_owner(session_id, owner_token)
+    except SessionOwnershipError as exc:
+        return JSONResponse(
+            status_code=403,
+            content={"status": "error", "message": str(exc), "session_id": session_id},
         )
 
     pipeline = _get_pipeline()
@@ -99,6 +129,7 @@ async def chat(request: Request) -> JSONResponse:
             message_hash=result.message_hash,
             stage_reached=cls.stage,
             reasoning=cls.reasoning,
+            owner_token=owner_token,
         )
 
         # Self-harm: return care response instead of generic flagged message.
