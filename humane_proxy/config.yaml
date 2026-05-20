@@ -199,7 +199,7 @@ safety:
       response_mode: "block"
 
       # Optional: override the default block message (leave empty to use built-in).
-     block_message: |
+      block_message: |
         💙 You're not alone. Please reach out to a crisis helpline in your country:
 
         🇺🇸 USA: 988 (Suicide & Crisis Lifeline)
