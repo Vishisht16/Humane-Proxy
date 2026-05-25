@@ -199,25 +199,12 @@ safety:
       response_mode: "block"
 
       # Optional: override the default block message (leave empty to use built-in).
-      block_message: |
-        💙 You're not alone. Please reach out to a crisis helpline in your country:
+      block_message: ""
+        
 
-        🇺🇸 USA: 988 (Suicide & Crisis Lifeline)
-        🇬🇧 UK: 116 123 (Samaritans)
-        🇨🇦 Canada: 1-833-456-4566
-        🇦🇺 Australia: 13 11 14 (Lifeline)
-        🇮🇳 India: iCall — 9152987821
-        🇯🇵 Japan: 0120-783-556 (Inochi no Denwa)
-        🇰🇷 South Korea: 1393 (Crisis Counseling)
-        🇩🇪 Germany: 0800 111 0 111 (Telefonseelsorge)
-        🇫🇷 France: 3114 (Numéro National Prévention Suicide)
-        🇪🇸 Spain: 024 (Línea de Atención a conducta suicida)
-        🇮🇹 Italy: 800 274 274 (Telefono Amico)
-        🇲🇽 Mexico: 800 290 0024 (SAPTEL)
-        🇳🇿 New Zealand: 1737 (Need to Talk?)
-        🇧🇷 Brazil: 188 (CVV)
+        
 
-        You matter. Help is available 24/7. 💙
+        
 
     criminal_intent:
       # Score threshold for escalation (below this → only log, no webhook).

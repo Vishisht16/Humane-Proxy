@@ -102,3 +102,23 @@ class TestCustomBlockMessage:
         with patch("humane_proxy.escalation.router.get_config", return_value=self._custom_config()):
             result = get_self_harm_response()
         assert result["message"] == "Custom care message for tests."
+class TestCareResponseBlockNewCountries:
+    """New country helplines are present in the built-in care response."""
+
+    def test_message_contains_japan_resource(self):
+        assert "0120-783-556" in CARE_RESPONSE_BLOCK or "Inochi" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_south_korea_resource(self):
+        assert "1393" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_spain_resource(self):
+        assert "717 003 717" in CARE_RESPONSE_BLOCK or "Esperanza" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_italy_resource(self):
+        assert "Telefono Amico" in CARE_RESPONSE_BLOCK or "02 2327 2327" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_mexico_resource(self):
+        assert "SAPTEL" in CARE_RESPONSE_BLOCK or "5259-8121" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_new_zealand_resource(self):
+        assert "1737" in CARE_RESPONSE_BLOCK or "Lifeline" in CARE_RESPONSE_BLOCK
