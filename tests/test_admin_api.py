@@ -117,6 +117,30 @@ class TestStats:
         assert by_cat["criminal_intent"] == 1
 
 
+class TestSessionRisk:
+    HEADERS = {"Authorization": "Bearer test-admin-secret"}
+
+    def test_session_risk_is_read_only(self, _seeded_db):
+        from humane_proxy.risk.trajectory import analyze, session_history, _category_history
+
+        sid = "sess-1"
+        analyze(sid, 0.1, "safe")
+        analyze(sid, 0.1, "safe")
+        analyze(sid, 0.1, "safe")
+        analyze(sid, 0.9, "self_harm")
+        before_score_count = len(session_history[sid])
+        before_category_count = len(_category_history[sid])
+
+        resp = client.get(f"/admin/sessions/{sid}/risk", headers=self.HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trajectory"]["message_count"] == before_score_count
+        assert data["trajectory"]["spike_detected"] is True
+        assert len(session_history[sid]) == before_score_count
+        assert len(_category_history[sid]) == before_category_count
+
+
 class TestDeleteSession:
     HEADERS = {"Authorization": "Bearer test-admin-secret"}
 
