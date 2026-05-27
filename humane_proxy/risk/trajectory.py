@@ -10,14 +10,15 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
+from typing import Any
 
-from humane_proxy import load_config
+from humane_proxy.config import get_config
 from humane_proxy.classifiers.models import TrajectoryResult
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-_CFG: dict = load_config().get("trajectory", {})
+_CFG: dict = get_config().get("trajectory", {})
 _WINDOW_SIZE: int = _CFG.get("window_size", 5)
 _SPIKE_DELTA: float = _CFG.get("spike_delta", 0.35)
 
@@ -42,6 +43,8 @@ _MAX_SESSIONS: int = 1000
 # Each entry is (score, timestamp_seconds).
 session_history: dict[str, deque[tuple[float, float]]] = {}
 _category_history: dict[str, deque[str]] = {}
+_redis_trajectory_store = None
+_redis_trajectory_store_key: tuple[str, str, str] | None = None
 
 
 def _evict_oldest_sessions() -> None:
@@ -85,6 +88,100 @@ def _weighted_mean(history: deque[tuple[float, float]], now: float) -> float:
     return weighted_sum / total_weight if total_weight > 0 else 0.0
 
 
+def _current_backend() -> str:
+    return get_config().get("storage", {}).get("backend", "sqlite")
+
+
+def _get_redis_trajectory_store():
+    global _redis_trajectory_store, _redis_trajectory_store_key
+    config = get_config()
+    redis_cfg = config.get("storage", {}).get("redis", {})
+    fingerprint = (
+        config.get("storage", {}).get("backend", "sqlite"),
+        redis_cfg.get("url", "redis://localhost:6379/0"),
+        redis_cfg.get("key_prefix", "humane_proxy:"),
+    )
+    if _redis_trajectory_store is None or _redis_trajectory_store_key != fingerprint:
+        from humane_proxy.risk.redis_trajectory import RedisTrajectoryStore
+
+        _redis_trajectory_store = RedisTrajectoryStore(config, window_size=_WINDOW_SIZE)
+        _redis_trajectory_store_key = fingerprint
+    return _redis_trajectory_store
+
+
+def _window_scores(window: list[dict[str, Any]]) -> list[float]:
+    return [float(entry["score"]) for entry in window]
+
+
+def _window_categories(window: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in window:
+        category = entry.get("category") or "safe"
+        counts[category] = counts.get(category, 0) + 1
+    return counts
+
+
+def _trend_from_scores(scores: list[float]) -> str:
+    if len(scores) < 4:
+        return "stable"
+
+    mid = len(scores) // 2
+    first_half_avg = sum(scores[:mid]) / mid
+    second_half_avg = sum(scores[mid:]) / (len(scores) - mid)
+    trend_delta = second_half_avg - first_half_avg
+    if trend_delta > 0.15:
+        return "escalating"
+    if trend_delta < -0.15:
+        return "declining"
+    return "stable"
+
+
+def _spike_from_scores(scores: list[float], timestamps: list[float]) -> bool:
+    if not scores:
+        return False
+    if len(scores) == 1:
+        return False
+
+    history = deque(zip(scores[:-1], timestamps[:-1]))
+    avg = _weighted_mean(history, timestamps[-1])
+    return scores[-1] - avg > _SPIKE_DELTA
+
+
+def _append_local(session_id: str, current_score: float, category: str | None = None) -> list[dict[str, Any]]:
+    now = time.time()
+
+    if len(session_history) > _MAX_SESSIONS and session_id not in session_history:
+        _evict_oldest_sessions()
+
+    if session_id not in session_history:
+        session_history[session_id] = deque(maxlen=_WINDOW_SIZE)
+
+    history = session_history[session_id]
+    history.append((current_score, now))
+
+    if category is not None:
+        if session_id not in _category_history:
+            _category_history[session_id] = deque(maxlen=_WINDOW_SIZE)
+        _category_history[session_id].append(category)
+
+    window = [
+        {"score": score, "timestamp": ts, "category": None}
+        for score, ts in history
+    ]
+    if category is not None and session_id in _category_history:
+        categories = list(_category_history[session_id])
+        for index, value in enumerate(categories[-len(window):]):
+            window[index]["category"] = value
+    return window
+
+
+def _build_result(session_id: str, window: list[dict[str, Any]]) -> tuple[bool, list[float], dict[str, int], str]:
+    scores = _window_scores(window)
+    timestamps = [float(entry["timestamp"]) for entry in window]
+    spike = _spike_from_scores(scores, timestamps)
+    return spike, scores, _window_categories(window), _trend_from_scores(scores)
+
+
 def detect_spike(session_id: str, current_score: float) -> bool:
     """Return ``True`` if the current score spikes above the recent average.
 
@@ -110,31 +207,15 @@ def detect_spike(session_id: str, current_score: float) -> bool:
     bool
         Whether a spike was detected.
     """
-    now = time.time()
+    if _current_backend() == "redis":
+        window = _get_redis_trajectory_store().append(session_id, current_score, None)
+        scores = _window_scores(window)
+        timestamps = [float(entry["timestamp"]) for entry in window]
+        return _spike_from_scores(scores, timestamps)
 
-    # --- memory-leak guard ---
-    if len(session_history) > _MAX_SESSIONS and session_id not in session_history:
-        _evict_oldest_sessions()
-
-    # Initialise the deque on first encounter.
-    if session_id not in session_history:
-        session_history[session_id] = deque(maxlen=_WINDOW_SIZE)
-
-    history = session_history[session_id]
-
-    # Not enough history to calculate a meaningful delta yet.
-    if len(history) == 0:
-        history.append((current_score, now))
-        return False
-
-    avg = _weighted_mean(history, now)
-    delta = current_score - avg
-
-    # Always record *after* computing the delta so the current score
-    # doesn't influence the baseline it's compared against.
-    history.append((current_score, now))
-
-    return delta > _SPIKE_DELTA
+    window = _append_local(session_id, current_score)
+    spike, _, _, _ = _build_result(session_id, window)
+    return spike
 
 
 # ---------------------------------------------------------------------------
@@ -167,34 +248,12 @@ def analyze(
         Rich trajectory analysis including spike detection, trend, and
         category distribution.
     """
-    # Run spike detection (this also appends the score to session_history).
-    spike = detect_spike(session_id, score)
+    if _current_backend() == "redis":
+        window = _get_redis_trajectory_store().append(session_id, score, category)
+    else:
+        window = _append_local(session_id, score, category)
 
-    # Track category history.
-    if session_id not in _category_history:
-        _category_history[session_id] = deque(maxlen=_WINDOW_SIZE)
-    _category_history[session_id].append(category)
-
-    # Get current window (extract raw scores for the public API).
-    history = session_history.get(session_id, deque())
-    scores = [s for s, _ in history]
-
-    # Trend detection: compare first half vs second half of the window.
-    trend = "stable"
-    if len(scores) >= 4:
-        mid = len(scores) // 2
-        first_half_avg = sum(scores[:mid]) / mid
-        second_half_avg = sum(scores[mid:]) / (len(scores) - mid)
-        trend_delta = second_half_avg - first_half_avg
-        if trend_delta > 0.15:
-            trend = "escalating"
-        elif trend_delta < -0.15:
-            trend = "declining"
-
-    # Category distribution.
-    cat_counts: dict[str, int] = {}
-    for c in _category_history.get(session_id, []):
-        cat_counts[c] = cat_counts.get(c, 0) + 1
+    spike, scores, cat_counts, trend = _build_result(session_id, window)
 
     return TrajectoryResult(
         spike_detected=spike,
