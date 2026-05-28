@@ -200,11 +200,6 @@ safety:
 
       # Optional: override the default block message (leave empty to use built-in).
       block_message: ""
-        
-
-        
-
-        
 
     criminal_intent:
       # Score threshold for escalation (below this → only log, no webhook).
