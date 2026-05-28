@@ -60,9 +60,17 @@ class SafetyPipeline:
         pipeline_cfg = config.get("pipeline", {})
         safety_cfg = config.get("safety", {})
 
-        self.enabled_stages: list[int] = pipeline_cfg.get("enabled_stages", [1])
-        self.stage1_ceiling: float = pipeline_cfg.get("stage1_ceiling", 0.3)
-        self.stage2_ceiling: float = pipeline_cfg.get("stage2_ceiling", 0.4)
+        raw_stages = pipeline_cfg.get("enabled_stages", [1])
+        if not isinstance(raw_stages, list):
+            logger.warning("Invalid enabled_stages %r — falling back to [1]", raw_stages)
+            raw_stages = [1]
+        self.enabled_stages: list[int] = raw_stages
+
+        raw_s1 = pipeline_cfg.get("stage1_ceiling", 0.3)
+        self.stage1_ceiling: float = float(raw_s1) if isinstance(raw_s1, (int, float)) else 0.3
+
+        raw_s2 = pipeline_cfg.get("stage2_ceiling", 0.4)
+        self.stage2_ceiling: float = float(raw_s2) if isinstance(raw_s2, (int, float)) else 0.4
         self.spike_boost: float = safety_cfg.get("spike_boost", 0.25)
         self.risk_threshold: float = safety_cfg.get("risk_threshold", 0.7)
         self.store_message_text: bool = config.get("privacy", {}).get(
