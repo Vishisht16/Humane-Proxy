@@ -93,3 +93,41 @@ class TestErrorHandling:
             "session_id": "test-empty-v2",
         })
         assert resp.status_code == 400
+
+
+class TestUpstreamErrorHandling:
+    def test_non_json_response_is_not_returned_raw(self, monkeypatch, caplog):
+        monkeypatch.setattr("humane_proxy.middleware.interceptor.LLM_API_URL", "https://upstream.example/v1/chat")
+        monkeypatch.setattr("humane_proxy.middleware.interceptor.LLM_API_KEY", "test-key")
+
+        class FakeResponse:
+            status_code = 502
+            text = "upstream token: SECRET-TOKEN-123"
+
+            def json(self):
+                raise ValueError("not json")
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, *args, **kwargs):
+                return FakeResponse()
+
+        monkeypatch.setattr("httpx.AsyncClient", lambda: FakeClient())
+        caplog.set_level("WARNING", logger="humane_proxy")
+
+        resp = client.post("/chat", json={
+            "session_id": "test-non-json",
+            "messages": [{"role": "user", "content": "Hello there"}],
+        })
+
+        assert resp.status_code == 502
+        data = resp.json()
+        assert data["status"] == "error"
+        assert "raw" not in data
+        assert "SECRET-TOKEN-123" not in caplog.text
+        assert "upstream token" not in caplog.text

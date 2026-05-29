@@ -11,24 +11,42 @@ import smtplib
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
 logger = logging.getLogger("humane_proxy.escalation.webhooks")
 
 
+def _sanitize_webhook_url(url: str) -> str:
+    """Return a host-only representation of a webhook URL."""
+    parts = urlsplit(url)
+    if not parts.scheme or not parts.netloc:
+        return url
+    return urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+
+
+def _redact_response_text(text: str, limit: int = 120) -> str:
+    """Return a redacted marker for logs."""
+    _ = limit
+    return "[redacted]"
+
+
 async def _post(url: str, payload: dict, *, headers: dict | None = None) -> None:
     """POST JSON to *url*, swallowing all errors."""
+    safe_url = _sanitize_webhook_url(url)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, json=payload, headers=headers or {})
             if resp.status_code >= 400:
                 logger.warning(
-                    "Webhook %s returned HTTP %d: %s",
-                    url[:60], resp.status_code, resp.text[:200],
+                    "Webhook %s returned HTTP %d (body redacted, len=%d)",
+                    safe_url,
+                    resp.status_code,
+                    len(resp.text),
                 )
     except Exception:
-        logger.exception("Webhook dispatch to %s failed", url[:60])
+        logger.exception("Webhook dispatch to %s failed", safe_url)
 
 
 # ---------------------------------------------------------------------------
