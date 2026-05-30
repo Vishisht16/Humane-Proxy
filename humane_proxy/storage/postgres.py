@@ -173,10 +173,48 @@ class PostgresStore(EscalationStore):
             avg = conn.execute(
                 "SELECT AVG(risk_score) as avg FROM escalations"
             ).fetchone()["avg"]
+            by_day = {
+                r["day"].isoformat() if hasattr(r["day"], "isoformat") else str(r["day"]): r["cnt"]
+                for r in conn.execute(
+                    """SELECT to_timestamp(timestamp)::date as day, COUNT(*) as cnt
+                       FROM escalations GROUP BY day ORDER BY day DESC LIMIT 30"""
+                ).fetchall()
+            }
+            top_sessions = conn.execute(
+                """SELECT session_id, COUNT(*) as cnt, AVG(risk_score) as avg_score
+                   FROM escalations GROUP BY session_id ORDER BY cnt DESC LIMIT 10"""
+            ).fetchall()
+            by_stage = {
+                r["stage_reached"]: r["cnt"]
+                for r in conn.execute(
+                    "SELECT stage_reached, COUNT(*) as cnt FROM escalations GROUP BY stage_reached"
+                ).fetchall()
+            }
+            cutoff_24h = datetime.now(timezone.utc).timestamp() - 86400
+            hourly = {
+                str(r["hour"]): r["cnt"]
+                for r in conn.execute(
+                    """SELECT to_char(to_timestamp(timestamp), 'HH24') as hour, COUNT(*) as cnt
+                       FROM escalations WHERE timestamp >= %s
+                       GROUP BY hour ORDER BY hour""",
+                    (cutoff_24h,),
+                ).fetchall()
+            }
         return {
             "total_escalations": total,
             "by_category": by_category,
             "average_risk_score": round(avg or 0.0, 3),
+            "by_day": by_day,
+            "top_sessions": [
+                {
+                    "session_id": row["session_id"],
+                    "count": row["cnt"],
+                    "avg_score": round(row["avg_score"] or 0, 3),
+                }
+                for row in top_sessions
+            ],
+            "by_stage": by_stage,
+            "hourly_last_24h": hourly,
         }
 
     def check_rate_limit(self, session_id: str) -> bool:

@@ -147,8 +147,11 @@ class RedisStore(EscalationStore):
             return 0
         pipe = self._client.pipeline()
         for esc_id in ids:
+            raw = self._client.hgetall(self._key("esc", esc_id))
             pipe.delete(self._key("esc", esc_id))
             pipe.zrem(self._key("esc_timeline"), esc_id)
+            if raw.get("category"):
+                pipe.zrem(self._key("category", raw["category"]), esc_id)
         pipe.delete(self._key("session", session_id))
         pipe.execute()
         return len(ids)

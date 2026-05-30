@@ -1,7 +1,4 @@
 """Tests for REST Admin API (GET/DELETE endpoints, auth, stats)."""
-
-import json
-import time
 from unittest.mock import patch
 
 import pytest
@@ -23,29 +20,20 @@ def _set_admin_key(monkeypatch):
 
 @pytest.fixture()
 def _seeded_db(tmp_path, monkeypatch):
-    """Create a temp DB with 3 escalation rows."""
+    """Create a temp store with 3 escalation rows."""
     db_path = tmp_path / "test_admin.db"
-    import sqlite3
-    conn = sqlite3.connect(str(db_path))
-    with conn:
-        conn.execute(
-            """CREATE TABLE escalations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT, category TEXT, risk_score REAL,
-                triggers TEXT, timestamp REAL,
-                message_hash TEXT, stage_reached INTEGER, reasoning TEXT
-            )"""
-        )
-        rows = [
-            ("sess-1", "self_harm", 1.0, '["keyword:kill myself"]', time.time(), None, 1, None),
-            ("sess-2", "criminal_intent", 0.75, '["keyword:how to make a bomb"]', time.time(), None, 1, None),
-            ("sess-1", "self_harm", 1.0, '["pattern:self_annihilation"]', time.time(), None, 2, "LLM reasoning"),
-        ]
-        conn.executemany(
-            "INSERT INTO escalations (session_id, category, risk_score, triggers, timestamp, message_hash, stage_reached, reasoning) VALUES (?,?,?,?,?,?,?,?)",
-            rows,
-        )
-    monkeypatch.setattr("humane_proxy.api.admin._get_db_path", lambda: str(db_path))
+    monkeypatch.setenv("HUMANE_PROXY_DB_PATH", str(db_path))
+
+    from humane_proxy.config import reload_config
+    from humane_proxy.storage.factory import get_store, reset_store
+
+    reload_config()
+    reset_store()
+    store = get_store()
+    store.init()
+    store.log("sess-1", "self_harm", 1.0, ["keyword:kill myself"])
+    store.log("sess-2", "criminal_intent", 0.75, ["keyword:how to make a bomb"])
+    store.log("sess-1", "self_harm", 1.0, ["pattern:self_annihilation"], stage_reached=2, reasoning="LLM reasoning")
     return db_path
 
 

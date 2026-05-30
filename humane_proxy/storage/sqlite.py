@@ -189,15 +189,40 @@ class SQLiteStore(EscalationStore):
             by_category = dict(conn.execute(
                 "SELECT category, COUNT(*) FROM escalations GROUP BY category"
             ).fetchall())
+            by_day = dict(conn.execute(
+                """SELECT date(timestamp, 'unixepoch') as day, COUNT(*)
+                   FROM escalations GROUP BY day ORDER BY day DESC LIMIT 30"""
+            ).fetchall())
             avg_score = conn.execute(
                 "SELECT AVG(risk_score) FROM escalations"
             ).fetchone()[0]
+            top_sessions = conn.execute(
+                """SELECT session_id, COUNT(*) as cnt, AVG(risk_score) as avg_score
+                   FROM escalations GROUP BY session_id ORDER BY cnt DESC LIMIT 10"""
+            ).fetchall()
+            by_stage = dict(conn.execute(
+                "SELECT stage_reached, COUNT(*) FROM escalations GROUP BY stage_reached"
+            ).fetchall())
+            cutoff_24h = datetime.now(timezone.utc).timestamp() - 86400
+            hourly = dict(conn.execute(
+                """SELECT strftime('%H', timestamp, 'unixepoch') as hour, COUNT(*)
+                   FROM escalations WHERE timestamp >= ?
+                   GROUP BY hour ORDER BY hour""",
+                (cutoff_24h,),
+            ).fetchall())
         finally:
             conn.close()
         return {
             "total_escalations": total,
             "by_category": by_category,
+            "by_day": by_day,
             "average_risk_score": round(avg_score or 0.0, 3),
+            "top_sessions": [
+                {"session_id": session, "count": count, "avg_score": round(avg or 0, 3)}
+                for session, count, avg in top_sessions
+            ],
+            "by_stage": by_stage,
+            "hourly_last_24h": hourly,
         }
 
     def check_rate_limit(self, session_id: str) -> bool:
