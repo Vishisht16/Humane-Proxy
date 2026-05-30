@@ -102,6 +102,8 @@ class TestCustomBlockMessage:
         with patch("humane_proxy.escalation.router.get_config", return_value=self._custom_config()):
             result = get_self_harm_response()
         assert result["message"] == "Custom care message for tests."
+
+        
 class TestCareResponseBlockNewCountries:
     """New country helplines are present in the built-in care response."""
 
@@ -122,3 +124,6 @@ class TestCareResponseBlockNewCountries:
 
     def test_message_contains_new_zealand_resource(self):
         assert "1737" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_france_second_resource(self):
+        assert "3114" in CARE_RESPONSE_BLOCK

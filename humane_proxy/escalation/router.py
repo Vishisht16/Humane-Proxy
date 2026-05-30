@@ -46,6 +46,7 @@ Please reach out to a crisis service near you:
 
 🇫🇷 France
   • Suicide Écoute: 01 45 39 40 00
+  • Numéro National Prévention Suicide: 3114
 
 🇧🇷 Brazil
   • CVV (Centro de Valorização da Vida): 188
@@ -53,14 +54,11 @@ Please reach out to a crisis service near you:
 🇿🇦 South Africa
   • SADAG: 0800 567 567
 
-  🇯🇵 Japan
+🇯🇵 Japan
   • Inochi no Denwa: 0120-783-556
 
 🇰🇷 South Korea
   • Crisis Counseling Hotline: 1393
-
-🇫🇷 France
-  • Numéro National Prévention Suicide: 3114
 
 🇪🇸 Spain
   • Línea de Atención a conducta suicida: 024
