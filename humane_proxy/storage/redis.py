@@ -142,14 +142,24 @@ class RedisStore(EscalationStore):
         return self._parse_record(raw) if raw else None
 
     def delete_session(self, session_id: str) -> int:
-        ids = self._client.zrange(self._key("session", session_id), 0, -1)
+        session_key = self._key("session", session_id)
+        ids = self._client.zrange(session_key, 0, -1)
         if not ids:
             return 0
-        pipe = self._client.pipeline()
+        
+        # Read the categories to avoid leaving orphaned category records
+        pipe_read = self._client.pipeline()
         for esc_id in ids:
+            pipe_read.hget(self._key("esc", esc_id), "category")
+        categories = pipe_read.execute()
+
+        pipe = self._client.pipeline()
+        for esc_id, category in zip(ids, categories):
             pipe.delete(self._key("esc", esc_id))
             pipe.zrem(self._key("esc_timeline"), esc_id)
-        pipe.delete(self._key("session", session_id))
+            if category:
+                pipe.zrem(self._key("category", category), esc_id)
+        pipe.delete(session_key)
         pipe.execute()
         return len(ids)
 
@@ -167,12 +177,11 @@ class RedisStore(EscalationStore):
         }
 
     def check_rate_limit(self, session_id: str) -> bool:
-        rate_key = self._key("rate", session_id)
-        current = self._client.get(rate_key)
-        if current is None:
-            self._client.setex(rate_key, self._rate_limit_window_s, 1)
-            return True
-        return int(current) < self._rate_limit_max
+        now = datetime.now(timezone.utc).timestamp()
+        cutoff = now - self._rate_limit_window_s
+        session_key = self._key("session", session_id)
+        count = self._client.zcount(session_key, cutoff, "+inf")
+        return count < self._rate_limit_max
 
     @staticmethod
     def _parse_record(raw: dict[str, str]) -> dict[str, Any]:

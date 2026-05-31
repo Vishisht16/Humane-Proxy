@@ -29,7 +29,7 @@ def _seeded_db(tmp_path, monkeypatch):
     conn = sqlite3.connect(str(db_path))
     with conn:
         conn.execute(
-            """CREATE TABLE escalations (
+            """CREATE TABLE IF NOT EXISTS escalations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT, category TEXT, risk_score REAL,
                 triggers TEXT, timestamp REAL,
@@ -45,7 +45,14 @@ def _seeded_db(tmp_path, monkeypatch):
             "INSERT INTO escalations (session_id, category, risk_score, triggers, timestamp, message_hash, stage_reached, reasoning) VALUES (?,?,?,?,?,?,?,?)",
             rows,
         )
-    monkeypatch.setattr("humane_proxy.api.admin._get_db_path", lambda: str(db_path))
+    monkeypatch.setenv("HUMANE_PROXY_DB_PATH", str(db_path))
+    
+    from humane_proxy.storage.factory import reset_store, get_store
+    reset_store()
+    store = get_store()
+    
+    monkeypatch.setattr("humane_proxy.api.admin.get_store", lambda *args, **kwargs: store)
+    monkeypatch.setattr("humane_proxy.storage.factory.get_store", lambda *args, **kwargs: store)
     return db_path
 
 

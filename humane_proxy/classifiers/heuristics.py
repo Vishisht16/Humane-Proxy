@@ -17,40 +17,61 @@ from __future__ import annotations
 
 import re
 
-from humane_proxy import load_config
+from humane_proxy.config import get_config, register_reload_callback
 
-_CFG: dict = load_config().get("heuristics", {})
+# Globals to hold dynamic heuristic configurations
+_SELF_HARM_KEYWORDS: list[str] = []
+_SELF_HARM_KEYWORD_SCORE: float = 0.7
+_SELF_HARM_PATTERNS: list[tuple[str, re.Pattern[str]]] = []
 
-# ---------------------------------------------------------------------------
-# Self-harm keywords
-# ---------------------------------------------------------------------------
-_SELF_HARM_KEYWORDS: list[str] = [
-    kw.lower() for kw in _CFG.get("self_harm_keywords", [])
-]
-_SELF_HARM_KEYWORD_SCORE: float = _CFG.get("self_harm_keyword_score", 0.7)
+_CRIMINAL_KEYWORDS: list[str] = []
+_CRIMINAL_KEYWORD_SCORE: float = 0.6
+_CRIMINAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = []
 
-_SELF_HARM_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    (kw, re.compile(rf"(?<!\w){re.escape(kw)}(?!\w)", re.I))
-    for kw in _SELF_HARM_KEYWORDS
-]
+_INTENT_PATTERN_SCORE: float = 0.7
 
-# ---------------------------------------------------------------------------
-# Criminal intent keywords
-# ---------------------------------------------------------------------------
-_CRIMINAL_KEYWORDS: list[str] = [
-    kw.lower() for kw in _CFG.get("criminal_keywords", [])
-]
-_CRIMINAL_KEYWORD_SCORE: float = _CFG.get("criminal_keyword_score", 0.6)
+_CONTEXT_REDUCERS: list[str] = []
+_CONTEXT_REDUCER_PATTERNS: list[re.Pattern[str]] = []
 
-_CRIMINAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    (kw, re.compile(rf"(?<!\w){re.escape(kw)}(?!\w)", re.I))
-    for kw in _CRIMINAL_KEYWORDS
-]
+
+def reload_heuristics(config: dict) -> None:
+    """Reload keyword lists and re-compile regex pattern lists from configuration."""
+    global _SELF_HARM_KEYWORDS, _SELF_HARM_KEYWORD_SCORE, _SELF_HARM_PATTERNS
+    global _CRIMINAL_KEYWORDS, _CRIMINAL_KEYWORD_SCORE, _CRIMINAL_PATTERNS
+    global _INTENT_PATTERN_SCORE, _CONTEXT_REDUCERS, _CONTEXT_REDUCER_PATTERNS
+
+    cfg = config.get("heuristics", {})
+
+    _SELF_HARM_KEYWORDS = [kw.lower() for kw in cfg.get("self_harm_keywords", [])]
+    _SELF_HARM_KEYWORD_SCORE = cfg.get("self_harm_keyword_score", 0.7)
+    _SELF_HARM_PATTERNS = [
+        (kw, re.compile(rf"(?<!\w){re.escape(kw)}(?!\w)", re.I))
+        for kw in _SELF_HARM_KEYWORDS
+    ]
+
+    _CRIMINAL_KEYWORDS = [kw.lower() for kw in cfg.get("criminal_keywords", [])]
+    _CRIMINAL_KEYWORD_SCORE = cfg.get("criminal_keyword_score", 0.6)
+    _CRIMINAL_PATTERNS = [
+        (kw, re.compile(rf"(?<!\w){re.escape(kw)}(?!\w)", re.I))
+        for kw in _CRIMINAL_KEYWORDS
+    ]
+
+    _INTENT_PATTERN_SCORE = cfg.get("intent_pattern_score", 0.7)
+
+    _CONTEXT_REDUCERS = [r.lower() for r in cfg.get("context_reducers", [])]
+    _CONTEXT_REDUCER_PATTERNS = [
+        re.compile(rf"(?<!\w){re.escape(r)}(?!\w)", re.I)
+        for r in _CONTEXT_REDUCERS
+    ]
+
+
+# Register the reload callback
+register_reload_callback(reload_heuristics)
+
 
 # ---------------------------------------------------------------------------
 # Intent patterns — regex patterns that detect grammatical intent structures
 # ---------------------------------------------------------------------------
-_INTENT_PATTERN_SCORE: float = _CFG.get("intent_pattern_score", 0.7)
 
 # Each entry: (name, category, compiled_pattern)
 _INTENT_PATTERNS: list[tuple[str, str, re.Pattern[str]]] = [
@@ -108,17 +129,9 @@ _INTENT_PATTERNS: list[tuple[str, str, re.Pattern[str]]] = [
     ),
 ]
 
-# ---------------------------------------------------------------------------
-# Context reducers — phrases that indicate non-harmful context
-# ---------------------------------------------------------------------------
-_CONTEXT_REDUCERS: list[str] = [
-    r.lower() for r in _CFG.get("context_reducers", [])
-]
 
-_CONTEXT_REDUCER_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(rf"(?<!\w){re.escape(r)}(?!\w)", re.I)
-    for r in _CONTEXT_REDUCERS
-]
+# Initialize from active config at load time
+reload_heuristics(get_config())
 
 
 def classify(text: str) -> tuple[str, float, list[str]]:

@@ -141,12 +141,32 @@ def get_config() -> dict:
         return _cached_config
 
 
+# Thread-safe callback registry
+_callbacks_lock = threading.Lock()
+_callbacks: list[Any] = []
+
+
+def register_reload_callback(callback: Any) -> None:
+    """Register a callback to be invoked on config reload."""
+    with _callbacks_lock:
+        if callback not in _callbacks:
+            _callbacks.append(callback)
+
+
 def reload_config() -> dict:
     """Force a re-read from disk and return the fresh config."""
     global _cached_config
     with _lock:
         _cached_config = _build_config()
-        return _cached_config
+        config = _cached_config
+    with _callbacks_lock:
+        callbacks = list(_callbacks)
+    for callback in callbacks:
+        try:
+            callback(config)
+        except Exception as exc:
+            logger.error("Failed to run config reload callback: %s", exc)
+    return config
 
 
 def _build_config() -> dict:

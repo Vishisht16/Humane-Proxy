@@ -255,36 +255,27 @@ def version() -> None:
 @click.option("--session", "-s", default=None, help="Filter by session ID")
 def escalations(category: str | None, limit: int, session: str | None) -> None:
     """List recent escalation events from the audit log."""
-    import json
-    import sqlite3
-    from humane_proxy.escalation.local_db import _get_db_path
+    from humane_proxy.storage.factory import get_store
 
-    conn = sqlite3.connect(_get_db_path(), check_same_thread=False)
+    store = get_store()
     try:
-        clauses, params = [], []
-        if category:
-            clauses.append("category = ?")
-            params.append(category)
-        if session:
-            clauses.append("session_id = ?")
-            params.append(session)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        rows = conn.execute(
-            f"SELECT id, session_id, category, risk_score, timestamp FROM escalations "
-            f"{where} ORDER BY timestamp DESC LIMIT ?",
-            params + [limit],
-        ).fetchall()
-    finally:
-        conn.close()
+        records = store.query(category=category, session_id=session, limit=limit)
+    except Exception as exc:
+        click.echo(f"  ❌ Failed to query escalations: {exc}")
+        return
 
-    if not rows:
+    if not records:
         click.echo("  ℹ  No escalations found.")
         return
 
     click.echo(f"\n  {'ID':<6} {'Session':<28} {'Category':<18} {'Score':<7} {'When'}")
     click.echo("  " + "-" * 75)
-    for row in rows:
-        id_, sid, cat, score, ts = row
+    for rec in records:
+        id_ = rec.get("id", 0)
+        sid = rec.get("session_id", "")
+        cat = rec.get("category", "")
+        score = rec.get("risk_score", 0.0)
+        ts = rec.get("timestamp", 0.0)
         from datetime import datetime, timezone
         dt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         emoji = "🆘" if cat == "self_harm" else "⚠️"
@@ -296,36 +287,33 @@ def escalations(category: str | None, limit: int, session: str | None) -> None:
 @click.argument("session_id")
 def session(session_id: str) -> None:
     """Show risk trajectory and escalation history for a session."""
-    import json
-    import sqlite3
-    from humane_proxy.escalation.local_db import _get_db_path
-    from humane_proxy.risk.trajectory import analyze
+    from humane_proxy.storage.factory import get_store
 
-    conn = sqlite3.connect(_get_db_path(), check_same_thread=False)
+    store = get_store()
     try:
-        rows = conn.execute(
-            "SELECT category, risk_score, timestamp, triggers FROM escalations "
-            "WHERE session_id = ? ORDER BY timestamp ASC",
-            (session_id,),
-        ).fetchall()
-    finally:
-        conn.close()
+        records = store.query(session_id=session_id, limit=1000)
+    except Exception as exc:
+        click.echo(f"  ❌ Failed to query session escalations: {exc}")
+        return
 
     click.echo(f"\n  📊 Session: {session_id}")
-    click.echo(f"  Escalation count: {len(rows)}\n")
+    click.echo(f"  Escalation count: {len(records)}\n")
 
-    if not rows:
+    if not records:
         click.echo("  ℹ  No escalations recorded for this session.")
         return
 
-    for cat, score, ts, triggers_json in rows:
+    # Show chronologically ascending (oldest first)
+    records = list(reversed(records))
+
+    for rec in records:
+        cat = rec.get("category", "")
+        score = rec.get("risk_score", 0.0)
+        ts = rec.get("timestamp", 0.0)
+        trigs = rec.get("triggers", [])
         from datetime import datetime, timezone
         dt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         emoji = "🆘" if cat == "self_harm" else "⚠️"
-        try:
-            trigs = json.loads(triggers_json)
-        except Exception:
-            trigs = []
         click.echo(f"  {emoji} {dt}  score={score:.2f}  category={cat}")
         if trigs:
             click.echo(f"     triggers: {', '.join(trigs[:3])}")

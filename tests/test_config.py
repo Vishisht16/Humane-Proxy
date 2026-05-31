@@ -78,3 +78,62 @@ class TestLoadConfig:
         reducers = config.get("heuristics", {}).get("context_reducers", [])
         assert "laughing" in reducers
         assert "warning signs" in reducers
+
+
+class TestConfigPropagation:
+    def test_heuristics_propagation_on_reload(self, tmp_path, monkeypatch):
+        from humane_proxy.classifiers import heuristics
+        
+        user_cfg = tmp_path / "humane_proxy.yaml"
+        user_cfg.write_text("""
+heuristics:
+  self_harm_keywords:
+    - "customharmone"
+  criminal_keywords:
+    - "customcriminalone"
+  context_reducers:
+    - "customreducerone"
+""")
+        monkeypatch.setenv("HUMANE_PROXY_CONFIG", str(user_cfg))
+        
+        reload_config()
+        
+        assert any(kw == "customharmone" for kw, _ in heuristics._SELF_HARM_PATTERNS)
+        assert any(kw == "customcriminalone" for kw, _ in heuristics._CRIMINAL_PATTERNS)
+        assert any(p.search("customreducerone") for p in heuristics._CONTEXT_REDUCER_PATTERNS)
+
+        user_cfg.write_text("""
+heuristics:
+  self_harm_keywords:
+    - "customharmtwo"
+  criminal_keywords:
+    - "customcriminaltwo"
+  context_reducers:
+    - "customreducertwo"
+""")
+        reload_config()
+        assert any(kw == "customharmtwo" for kw, _ in heuristics._SELF_HARM_PATTERNS)
+        assert not any(kw == "customharmone" for kw, _ in heuristics._SELF_HARM_PATTERNS)
+        assert any(kw == "customcriminaltwo" for kw, _ in heuristics._CRIMINAL_PATTERNS)
+        assert any(p.search("customreducertwo") for p in heuristics._CONTEXT_REDUCER_PATTERNS)
+
+    def test_trajectory_propagation_on_reload(self, tmp_path, monkeypatch):
+        from humane_proxy.risk import trajectory
+        
+        user_cfg = tmp_path / "humane_proxy.yaml"
+        user_cfg.write_text("""
+trajectory:
+  window_size: 10
+  spike_delta: 0.55
+  decay_half_life_hours: 12.0
+""")
+        monkeypatch.setenv("HUMANE_PROXY_CONFIG", str(user_cfg))
+        
+        reload_config()
+        
+        assert trajectory._WINDOW_SIZE == 10
+        assert trajectory._SPIKE_DELTA == 0.55
+        assert trajectory._DECAY_HALF_LIFE_HOURS == 12.0
+        import math
+        expected_lambda = math.log(2) / (12.0 * 3600)
+        assert math.isclose(trajectory._DECAY_LAMBDA, expected_lambda)

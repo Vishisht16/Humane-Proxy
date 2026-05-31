@@ -140,39 +140,13 @@ if _MCP_AVAILABLE:
         list[dict]
             List of escalation records.
         """
-        import json
-        import sqlite3
+        from humane_proxy.storage.factory import get_store
         from humane_proxy.escalation.query import normalize_escalation_query
-        from humane_proxy.escalation.local_db import _get_db_path
 
         limit, category = normalize_escalation_query(limit, category)
 
-        conn = sqlite3.connect(_get_db_path(), check_same_thread=False)
-        try:
-            if category:
-                rows = conn.execute(
-                    "SELECT * FROM escalations WHERE category=? ORDER BY timestamp DESC LIMIT ?",
-                    (category, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM escalations ORDER BY timestamp DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
-        finally:
-            conn.close()
-
-        cols = ["id", "session_id", "category", "risk_score", "triggers",
-                "timestamp", "message_hash", "stage_reached", "reasoning"]
-        result = []
-        for row in rows:
-            rec = dict(zip(cols, row))
-            try:
-                rec["triggers"] = json.loads(rec["triggers"])
-            except Exception:
-                pass
-            result.append(rec)
-        return result
+        store = get_store()
+        return store.query(category=category, limit=limit)
 
 else:
     mcp = None  # type: ignore[assignment]

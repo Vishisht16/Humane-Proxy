@@ -11,30 +11,47 @@ import math
 import time
 from collections import deque
 
-from humane_proxy import load_config
+from humane_proxy.config import get_config, register_reload_callback
 from humane_proxy.classifiers.models import TrajectoryResult
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-_CFG: dict = load_config().get("trajectory", {})
-_WINDOW_SIZE: int = _CFG.get("window_size", 5)
-_SPIKE_DELTA: float = _CFG.get("spike_delta", 0.35)
-
-# Decay half-life in hours.  After this many hours a historical score
-# contributes only 50 % of its original weight to the rolling baseline.
-# Set to 0 or negative to disable decay entirely.
-_DECAY_HALF_LIFE_HOURS: float = _CFG.get("decay_half_life_hours", 24.0)
-
-# Precompute lambda: λ = ln(2) / half_life.
-_DECAY_LAMBDA: float = (
-    math.log(2) / (_DECAY_HALF_LIFE_HOURS * 3600)
-    if _DECAY_HALF_LIFE_HOURS > 0
-    else 0.0
-)
+_WINDOW_SIZE: int = 5
+_SPIKE_DELTA: float = 0.35
+_DECAY_HALF_LIFE_HOURS: float = 24.0
+_DECAY_LAMBDA: float = 0.0
 
 # Maximum distinct sessions to track before eviction (memory-leak prevention).
 _MAX_SESSIONS: int = 1000
+
+
+def reload_trajectory(config: dict) -> None:
+    """Reload trajectory threshold and decay settings from configuration."""
+    global _WINDOW_SIZE, _SPIKE_DELTA, _DECAY_HALF_LIFE_HOURS, _DECAY_LAMBDA
+
+    cfg = config.get("trajectory", {})
+    _WINDOW_SIZE = cfg.get("window_size", 5)
+    _SPIKE_DELTA = cfg.get("spike_delta", 0.35)
+    _DECAY_HALF_LIFE_HOURS = cfg.get("decay_half_life_hours", 24.0)
+    _DECAY_LAMBDA = (
+        math.log(2) / (_DECAY_HALF_LIFE_HOURS * 3600)
+        if _DECAY_HALF_LIFE_HOURS > 0
+        else 0.0
+    )
+
+    # Adjust existing in-memory deques to match new window size.
+    for session_id, history in list(session_history.items()):
+        if history.maxlen != _WINDOW_SIZE:
+            session_history[session_id] = deque(history, maxlen=_WINDOW_SIZE)
+
+    for session_id, cat_hist in list(_category_history.items()):
+        if cat_hist.maxlen != _WINDOW_SIZE:
+            _category_history[session_id] = deque(cat_hist, maxlen=_WINDOW_SIZE)
+
+
+# Register the reload callback
+register_reload_callback(reload_trajectory)
 
 # ---------------------------------------------------------------------------
 # In-memory session stores
@@ -43,6 +60,9 @@ _MAX_SESSIONS: int = 1000
 session_history: dict[str, deque[tuple[float, float]]] = {}
 _category_history: dict[str, deque[str]] = {}
 _last_spike_by_session: dict[str, bool] = {}
+
+# Initialize from active config at load time
+reload_trajectory(get_config())
 
 
 def _evict_oldest_sessions() -> None:

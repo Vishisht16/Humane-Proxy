@@ -21,6 +21,7 @@ try:
 except ImportError:
     _PG_AVAILABLE = False
     psycopg = None  # type: ignore[assignment]
+    dict_row = None  # type: ignore[assignment]
 
 
 class PostgresStore(EscalationStore):
