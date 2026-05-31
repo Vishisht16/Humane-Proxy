@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 from humane_proxy.escalation.local_db import init_db
 from humane_proxy.escalation.router import escalate, get_self_harm_response
+from json import JSONDecodeError
 
 logger = logging.getLogger("humane_proxy")
 
@@ -74,7 +75,17 @@ def _extract_last_user_message(payload: dict[str, Any]) -> str:
 @app.post("/chat")
 async def chat(request: Request) -> JSONResponse:
     """Intercept a chat request, evaluate safety, then forward or respond."""
-    payload: dict[str, Any] = await request.json()
+    try:
+        payload: dict[str, Any] = await request.json()
+    except (JSONDecodeError, ValueError):
+        return JSONResponse(
+           status_code=400,
+           content={
+              "status": "error",
+               "message": "Request body must contain valid JSON",
+            },
+        )
+ 
 
     session_id = _resolve_session_id(payload, request)
     user_message = _extract_last_user_message(payload)
