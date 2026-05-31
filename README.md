@@ -17,12 +17,42 @@ HumaneProxy sits between your users and any LLM. When someone expresses self-har
 
 ## What it does
 
-```
-User message → HumaneProxy → (safe?) → Upstream LLM → Response
-                    ↓
-              (self_harm or criminal_intent?)
-                    ↓
-              Empathetic care response  +  Operator alert
+## Architecture Diagram
+
+## Request flow
+
+```mermaid
+flowchart TD
+    A([User message\nArrives at proxy endpoint])
+    A --> B
+
+    B["Stage 1 — keyword filter\nAlways active · zero latency\nScores message against harm keyword list"]
+    B --> C{Below\nthreshold?}
+
+    C -->|yes| D
+    C -->|no| H
+
+    D["Stage 2 — ML classifier\nOptional · pip install humane-proxy[ml]\nSet OPENAI_API_KEY or GROQ_API_KEY\nAll messages routed here when enabled"]
+    D --> E{Stage 2\npass?}
+
+    E -->|yes| F
+    E -->|no| H
+
+    F([Upstream LLM\nRequest forwarded · response returned])
+
+    H["Harm detected\nself_harm or criminal_intent"]
+    H --> I["Care response\nReturned to user · LLM skipped"]
+    I --> J["Operator webhook\nPOST to WEBHOOK_URL\nHarm events only"]
+
+    style A fill:#F1EFE8,stroke:#888780,color:#2C2C2A
+    style B fill:#EEEDFE,stroke:#534AB7,color:#3C3489
+    style C fill:#F1EFE8,stroke:#888780,color:#2C2C2A
+    style D fill:#E1F5EE,stroke:#0F6E56,color:#085041
+    style E fill:#F1EFE8,stroke:#888780,color:#2C2C2A
+    style F fill:#EAF3DE,stroke:#3B6D11,color:#27500A
+    style H fill:#FAECE7,stroke:#993C1D,color:#712B13
+    style I fill:#FAEEDA,stroke:#854F0B,color:#633806
+    style J fill:#FCEBEB,stroke:#A32D2D,color:#791F1F
 ```
 
 - 🆘 **Self-harm detected** → Blocked with international crisis resources. Operator notified.
@@ -111,28 +141,85 @@ humane-proxy mcp-serve --transport http --host 0.0.0.0 --port 3000
 ## 3-Stage Cascade Pipeline
 
 HumaneProxy classifies every message through up to **3 stages**, each progressively more capable but also more expensive.
-
-```
-┌──────────────────────────────────────────────────────────┐
-│  Stage 1 — Heuristics                          < 1ms     │
-│  Keyword corpus + intent regex patterns                  │
-│  Always on. Catches clear cases instantly.               │
-│  Early-exit: definitive self_harm → block immediately.   │
-└──────────────────────────────────────────────────────────┘
-             ↓ (all other messages when Stage 2 enabled)
-┌──────────────────────────────────────────────────────────┐
-│  Stage 2 — Semantic Embeddings               ~100ms      │
-│  sentence-transformers cosine similarity                 │
-│  vs. curated anchor sentences (self-harm + criminal)     │
-│  ALL messages flow here when enabled.                    │
-│  Optional: pip install humane-proxy[ml]                  │
-└──────────────────────────────────────────────────────────┘
-             ↓ (still ambiguous)
-┌──────────────────────────────────────────────────────────┐
-│  Stage 3 — Reasoning LLM                     ~1–3s       │
-│  LlamaGuard (Groq) or OpenAI Moderation API              │
-│  Optional: set OPENAI_API_KEY or GROQ_API_KEY            │
-└──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    %% ── Entry ─────────────────────────────
+    IN([Incoming Request])
+    %% ── Stage 1 ───────────────────────────
+    subgraph S1["Stage 1 · Heuristics"]
+        direction TB
+        S1_Q{{Keyword / regex match?}}
+        S1_N["• Keyword corpus + intent regex
+- Always enabled
+- Fast pattern matching
+- Runtime: &lt; 1 ms"]
+    end
+    %% ── Stage 2 ───────────────────────────
+    subgraph S2["Stage 2 · Semantic Similarity"]
+        direction TB
+        S2_Q{{Similar to harmful intent?}}
+        S2_N["• sentence-transformers embeddings
+- Cosine similarity scoring
+- Detects semantic intent
+- Runtime: ~100 ms
+Enable with:
+pip install humane-proxy[ml]
+All requests flow here when enabled"]
+    end
+    %% ── Stage 3 ───────────────────────────
+    subgraph S3["Stage 3 · Reasoning LLM"]
+        direction TB
+        S3_Q{{LLM moderation decision?}}
+        S3_N["• LlamaGuard (Groq)
+- OpenAI Moderation API
+- Used only for unclear cases
+- Runtime: ~1–3 s
+Requires:
+OPENAI_API_KEY
+or GROQ_API_KEY"]
+    end
+    %% ── Outcomes ──────────────────────────
+    BLOCK([Block Request — Return 403])
+    ALLOW([Forward to LLM])
+    %% ── Side Effects ──────────────────────
+    DB[("Log Request")]
+    WH[["Webhook Dispatch (blocked only)"]]
+    %% ── Main Flow ─────────────────────────
+    IN --> S1_Q
+    S1_Q -- "Above threshold" --> BLOCK
+    S1_Q -- "Below threshold" --> ALLOW
+    S1_Q -- "Unclear" --> S2_Q
+    S2_Q -- "Above threshold" --> BLOCK
+    S2_Q -- "Below threshold" --> ALLOW
+    S2_Q -- "Still unclear" --> S3_Q
+    S3_Q -- "Unsafe" --> BLOCK
+    S3_Q -- "Safe" --> ALLOW
+    %% ── Notes ─────────────────────────────
+    S1_Q -.-> S1_N
+    S2_Q -.-> S2_N
+    S3_Q -.-> S3_N
+    %% ── Async Actions ─────────────────────
+    BLOCK -.-> DB
+    ALLOW -.-> DB
+    BLOCK -.-> WH
+    %% ── Styles ────────────────────────────
+    classDef decision fill:#f8fafc,stroke:#94a3b8,stroke-width:1.5px,color:#1e293b;
+    classDef stage1note fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f;
+    classDef stage2note fill:#fef9c3,stroke:#eab308,color:#713f12;
+    classDef stage3note fill:#f3e8ff,stroke:#a855f7,color:#3b0764;
+    classDef block fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#7f1d1d,font-weight:bold;
+    classDef allow fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#14532d,font-weight:bold;
+    classDef async fill:#f1f5f9,stroke:#94a3b8,stroke-dasharray:4 3,color:#334155;
+    class S1_Q,S2_Q,S3_Q decision;
+    class S1_N stage1note;
+    class S2_N stage2note;
+    class S3_N stage3note;
+    class BLOCK block;
+    class ALLOW allow;
+    class DB,WH async;
+    style S1 fill:#eff6ff,stroke:#bfdbfe,stroke-width:1.5px;
+    style S2 fill:#fefce8,stroke:#fde68a,stroke-width:1.5px;
+    style S3 fill:#faf5ff,stroke:#e9d5ff,stroke-width:1.5px;
 ```
 
 ### Configuring the Pipeline
