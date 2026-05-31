@@ -41,6 +41,27 @@ class TestCareResponseBlock:
     def test_message_contains_emergency_guidance(self):
         assert "emergency" in CARE_RESPONSE_BLOCK.lower()
 
+    def test_message_contains_japan_resource(self):
+        assert "0120-783-556" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_south_korea_resource(self):
+        assert "1393" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_spain_resource(self):
+        assert "Línea de Atención a conducta suicida: 024" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_italy_resource(self):
+        assert "800 274 274" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_mexico_resource(self):
+        assert "800 290 0024" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_new_zealand_resource(self):
+        assert "1737" in CARE_RESPONSE_BLOCK
+
+    def test_message_contains_france_second_resource(self):
+        assert "3114" in CARE_RESPONSE_BLOCK
+
 
 class TestCareResponseForward:
     """Forward mode injects care context into the LLM payload."""
@@ -102,3 +123,4 @@ class TestCustomBlockMessage:
         with patch("humane_proxy.escalation.router.get_config", return_value=self._custom_config()):
             result = get_self_harm_response()
         assert result["message"] == "Custom care message for tests."
+
