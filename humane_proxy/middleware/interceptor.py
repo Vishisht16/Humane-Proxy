@@ -78,13 +78,13 @@ async def chat(request: Request) -> JSONResponse:
     try:
         payload: dict[str, Any] = await request.json()
     except (JSONDecodeError, ValueError):
-       return JSONResponse(
-        status_code=400,
-        content={
-            "status": "error",
-            "message": "Request body must contain valid JSON",
-        },
-    )
+        return JSONResponse(
+           status_code=400,
+           content={
+              "status": "error",
+               "message": "Request body must contain valid JSON",
+            },
+        )
  
 
     session_id = _resolve_session_id(payload, request)

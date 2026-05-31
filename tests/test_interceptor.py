@@ -97,7 +97,7 @@ class TestErrorHandling:
     def test_empty_request_body_returns_400(self):
         resp = client.post(
             "/chat",
-             data="",
+             content="",
              headers={"Content-Type": "application/json"},
         )
 
