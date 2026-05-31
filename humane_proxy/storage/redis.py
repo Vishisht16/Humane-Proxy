@@ -60,6 +60,40 @@ class RedisStore(EscalationStore):
         self._client = _redis.Redis.from_url(url, decode_responses=True)
         self._rate_limit_max = rate_limit_max
         self._rate_limit_window_s = rate_limit_window_hours * 3600
+        self._log_script = self._client.register_script(
+            """
+            local esc_id = redis.call('INCR', KEYS[1])
+            local record_key = KEYS[2] .. ':' .. esc_id
+            redis.call(
+                'HSET', record_key,
+                'id', esc_id,
+                'session_id', ARGV[1],
+                'category', ARGV[2],
+                'risk_score', ARGV[3],
+                'triggers', ARGV[4],
+                'timestamp', ARGV[5],
+                'message_hash', ARGV[6],
+                'stage_reached', ARGV[7],
+                'reasoning', ARGV[8]
+            )
+            redis.call('ZADD', KEYS[3], ARGV[5], esc_id)
+            redis.call('ZADD', KEYS[4], ARGV[5], esc_id)
+            redis.call('ZADD', KEYS[5], ARGV[5], esc_id)
+            return esc_id
+            """
+        )
+        self._rate_limit_script = self._client.register_script(
+            """
+            local count = redis.call('INCR', KEYS[1])
+            if count == 1 then
+                redis.call('EXPIRE', KEYS[1], ARGV[1])
+            end
+            if count <= tonumber(ARGV[2]) then
+                return 1
+            end
+            return 0
+            """
+        )
 
     def _key(self, *parts: str) -> str:
         return self._prefix + ":".join(parts)
@@ -79,27 +113,26 @@ class RedisStore(EscalationStore):
         stage_reached: int = 1,
         reasoning: str | None = None,
     ) -> None:
-        esc_id = self._client.incr(self._key("esc_id_seq"))
         ts = datetime.now(timezone.utc).timestamp()
-
-        record = {
-            "id": str(esc_id),
-            "session_id": session_id,
-            "category": category,
-            "risk_score": str(risk_score),
-            "triggers": json.dumps(triggers or []),
-            "timestamp": str(ts),
-            "message_hash": message_hash or "",
-            "stage_reached": str(stage_reached),
-            "reasoning": reasoning or "",
-        }
-
-        pipe = self._client.pipeline()
-        pipe.hset(self._key("esc", str(esc_id)), mapping=record)
-        pipe.zadd(self._key("esc_timeline"), {str(esc_id): ts})
-        pipe.zadd(self._key("session", session_id), {str(esc_id): ts})
-        pipe.zadd(self._key("category", category), {str(esc_id): ts})
-        pipe.execute()
+        self._log_script(
+            keys=[
+                self._key("esc_id_seq"),
+                self._key("esc"),
+                self._key("esc_timeline"),
+                self._key("session", session_id),
+                self._key("category", category),
+            ],
+            args=[
+                session_id,
+                category,
+                str(risk_score),
+                json.dumps(triggers or []),
+                str(ts),
+                message_hash or "",
+                str(stage_reached),
+                reasoning or "",
+            ],
+        )
 
     def query(
         self,
@@ -168,11 +201,11 @@ class RedisStore(EscalationStore):
 
     def check_rate_limit(self, session_id: str) -> bool:
         rate_key = self._key("rate", session_id)
-        current = self._client.get(rate_key)
-        if current is None:
-            self._client.setex(rate_key, self._rate_limit_window_s, 1)
-            return True
-        return int(current) < self._rate_limit_max
+        allowed = self._rate_limit_script(
+            keys=[rate_key],
+            args=[str(self._rate_limit_window_s), str(self._rate_limit_max)],
+        )
+        return bool(int(allowed))
 
     @staticmethod
     def _parse_record(raw: dict[str, str]) -> dict[str, Any]:
