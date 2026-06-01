@@ -1,5 +1,6 @@
 """Tests for humane_proxy.escalation.webhooks."""
 
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -9,6 +10,7 @@ from humane_proxy.escalation.webhooks import (
     send_discord,
     send_pagerduty,
     send_slack,
+    _sanitize_webhook_url,
 )
 
 
@@ -35,6 +37,28 @@ class TestSlack:
             payload = mock.call_args[0][1]
             header_text = payload["blocks"][0]["text"]["text"]
             assert "self_harm" in header_text
+
+    async def test_post_redacts_webhook_url_and_body(self, caplog):
+        class FakeResponse:
+            status_code = 400
+            text = "bad request for /services/T000/B000/SECRET?token=abc123"
+
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=FakeResponse()):
+            caplog.set_level(logging.WARNING, logger="humane_proxy.escalation.webhooks")
+            from humane_proxy.escalation.webhooks import _post
+
+            await _post("https://hooks.slack.com/services/T000/B000/SECRET?token=abc123", {"x": 1})
+
+        assert "hooks.slack.com" in caplog.text
+        assert "/services/T000/B000/SECRET" not in caplog.text
+        assert "token=abc123" not in caplog.text
+        assert "bad request for" not in caplog.text
+
+
+class TestSanitizeWebhookUrl:
+    def test_sanitize_webhook_url_strips_sensitive_parts(self):
+        assert _sanitize_webhook_url("https://hooks.slack.com/services/T000/B000/SECRET?token=abc123") == "https://hooks.slack.com"
+        assert _sanitize_webhook_url("not-a-url") == "not-a-url"
 
 
 @pytest.mark.asyncio

@@ -72,6 +72,12 @@ def _extract_last_user_message(payload: dict[str, Any]) -> str:
     return ""
 
 
+def _redact_upstream_body(body: str, limit: int = 120) -> str:
+    """Return a redacted marker for internal logs."""
+    _ = (body, limit)
+    return "[redacted]"
+
+
 @app.post("/chat")
 async def chat(request: Request) -> JSONResponse:
     """Intercept a chat request, evaluate safety, then forward or respond."""
@@ -162,10 +168,14 @@ async def chat(request: Request) -> JSONResponse:
         try:
             body = llm_response.json()
         except (ValueError, TypeError):
+            raw_body = llm_response.text
+            logger.warning(
+                "Upstream returned non-JSON (HTTP %d); body redacted",
+                llm_response.status_code,
+            )
             body = {
                 "status": "error",
                 "message": f"Upstream returned non-JSON (HTTP {llm_response.status_code}).",
-                "raw": llm_response.text[:500],
             }
         return JSONResponse(status_code=llm_response.status_code, content=body)
 
