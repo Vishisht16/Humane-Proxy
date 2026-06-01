@@ -29,6 +29,7 @@ import httpx
 
 from humane_proxy.classifiers.models import ClassificationResult
 from humane_proxy.classifiers.stage3.base import Stage3Classifier
+from humane_proxy.telemetry import traced_stage
 
 logger = logging.getLogger("humane_proxy.classifiers.stage3.openai_chat")
 
@@ -67,6 +68,7 @@ class OpenAIChatClassifier(Stage3Classifier):
         self._timeout: float = config.get("stage3", {}).get("timeout", 10.0)
         self._api_key: str = os.environ.get("OPENAI_API_KEY", "")
 
+    @traced_stage("stage3.reasoning_llm")
     async def classify(
         self, text: str, prior: ClassificationResult
     ) -> ClassificationResult:
