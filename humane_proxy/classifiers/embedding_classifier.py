@@ -32,7 +32,7 @@ import logging
 import os
 import threading
 from typing import Any
-
+from humane_proxy.telemetry import traced_stage
 from humane_proxy.classifiers.models import ClassificationResult
 
 logger = logging.getLogger("humane_proxy.classifiers.embedding")
@@ -222,7 +222,7 @@ class EmbeddingClassifier:
         self._benign_embeddings = self._model.encode(
             BENIGN_ANCHORS, show_progress_bar=False,
         )
-
+    @traced_stage("stage2.embeddings")
     def classify(self, text: str) -> ClassificationResult:
         """Classify *text* using semantic similarity to anchor sentences.
 

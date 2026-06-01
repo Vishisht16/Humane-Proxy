@@ -12,6 +12,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from humane_proxy.telemetry import setup_telemetry
 from humane_proxy.escalation.local_db import init_db
 from humane_proxy.escalation.router import escalate, get_self_harm_response
 
@@ -34,6 +35,8 @@ def _get_pipeline():
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    from humane_proxy.config import get_config
+    setup_telemetry(get_config())
     init_db()
     _get_pipeline()
     logger.info("[HumaneProxy] Database initialised. Server is ready.")
