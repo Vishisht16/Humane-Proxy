@@ -131,3 +131,16 @@ class TestUpstreamErrorHandling:
         assert "raw" not in data
         assert "SECRET-TOKEN-123" not in caplog.text
         assert "upstream token" not in caplog.text
+
+    def test_empty_request_body_returns_400(self):
+        resp = client.post(
+            "/chat",
+             content="",
+             headers={"Content-Type": "application/json"},
+        )
+
+        assert resp.status_code == 400
+
+        data = resp.json()
+        assert data["status"] == "error"
+        assert "valid JSON" in data["message"]
