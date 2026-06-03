@@ -1,16 +1,42 @@
-"""
-humane_proxy/telemetry.py
+# Copyright 2026 Vishisht Mishra (Vishisht16)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-Owns ALL OpenTelemetry logic for HumaneProxy.
+"""OpenTelemetry tracing support for HumaneProxy (Issue #7).
 
-- setup_telemetry(config) must be called once inside _lifespan.
-- @traced_stage(span_name) wraps any sync or async pipeline method with a span.
+Owns ALL OTel logic so the rest of the codebase stays clean.
 
-When telemetry is disabled, a NoOpTracerProvider is registered.
-All OTel API calls are zero-overhead no-ops at the library level.
+Public API
+----------
+setup_telemetry(config)
+    Call once inside _lifespan after config is loaded.
+    Reads ``telemetry.enabled`` (yaml) or ``HUMANE_PROXY_TELEMETRY_ENABLED``
+    (env var, wins over yaml).  When disabled, registers a NoOpTracerProvider
+    so every OTel call is a zero-overhead no-op — no if/else in hot paths.
 
-Privacy guarantee: raw message text is NEVER added to any span attribute.
-Only hashed identifiers and numeric scores are recorded.
+@traced_stage(span_name)
+    Decorator for any sync or async pipeline method.
+    Creates a span, populates privacy-safe attributes from the return dict,
+    records exceptions, and re-raises them — never swallows errors.
+
+setup_telemetry_with_memory_exporter()   [TEST HELPER]
+    Wires a fresh InMemorySpanExporter and returns it.
+    Used in tests to inspect recorded spans without a real OTLP backend.
+
+Privacy guarantee
+-----------------
+Raw message text is NEVER written to a span attribute.
+Only: session_id, category, score, stage_reached, triggers_count, message_hash.
 """
 
 from __future__ import annotations
@@ -20,11 +46,11 @@ import functools
 import logging
 from typing import Any, Callable, Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("humane_proxy.telemetry")
 
-
-# Lazy imports — opentelemetry is an optional dependency.
-
+# ---------------------------------------------------------------------------
+# Optional import — only available when humane-proxy[telemetry] is installed.
+# ---------------------------------------------------------------------------
 try:
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
@@ -35,40 +61,37 @@ try:
 except ImportError:
     _OTEL_AVAILABLE = False
 
-# Module-level tracer.  Always set by setup_telemetry() before first use.
-# Tests inject directly via setup_telemetry_with_memory_exporter().
+# Module-level tracer — set by setup_telemetry() before first use.
 _tracer: Optional[Any] = None
 
 
-# Public setup API
-
+# ---------------------------------------------------------------------------
+# Public: initialise
+# ---------------------------------------------------------------------------
 
 def setup_telemetry(config: Any) -> None:
-    """
-    Initialise the global tracer.  Must be called once inside _lifespan.
+    """Initialise the global tracer.  Call once inside _lifespan.
 
-    Decision tree
-    -------------
-    1. Check HUMANE_PROXY_TELEMETRY_ENABLED env var (wins over yaml).
-    2. Fall back to config.telemetry.enabled (default: False).
-    3. disabled  → NoOpTracerProvider, zero overhead.
-    4. enabled but opentelemetry not installed → warn, fall back to no-op.
-    5. enabled and opentelemetry installed     → OTLP TracerProvider.
+    Priority: HUMANE_PROXY_TELEMETRY_ENABLED env var > config.telemetry.enabled.
+    Default: disabled.
     """
     global _tracer
 
     import os
 
+    # 1. Env override wins.
     env_val = os.environ.get("HUMANE_PROXY_TELEMETRY_ENABLED", "").strip().lower()
     if env_val in ("1", "true", "yes"):
         enabled = True
     elif env_val in ("0", "false", "no"):
         enabled = False
     else:
+        # 2. Read from config dict.
         try:
             tel_cfg = (
-                config.telemetry if hasattr(config, "telemetry")
-                else config.get("telemetry", {})
+                config.get("telemetry", {})
+                if isinstance(config, dict)
+                else getattr(config, "telemetry", {})
             )
             enabled = (
                 tel_cfg.get("enabled", False)
@@ -85,16 +108,18 @@ def setup_telemetry(config: Any) -> None:
 
     if not _OTEL_AVAILABLE:
         logger.warning(
-            "HumaneProxy telemetry: enabled in config but 'opentelemetry' is not "
-            "installed. Run: pip install humane-proxy[telemetry]. Using no-op tracer."
+            "HumaneProxy telemetry: enabled in config but opentelemetry is not "
+            "installed. Run: pip install humane-proxy[telemetry]  Using no-op tracer."
         )
         _tracer = _make_noop_tracer()
         return
 
+    # 3. Build real TracerProvider with OTLP exporter.
     try:
         tel_cfg = (
-            config.telemetry if hasattr(config, "telemetry")
-            else config.get("telemetry", {})
+            config.get("telemetry", {})
+            if isinstance(config, dict)
+            else getattr(config, "telemetry", {})
         )
         endpoint = (
             tel_cfg.get("endpoint", "http://localhost:4317")
@@ -104,7 +129,6 @@ def setup_telemetry(config: Any) -> None:
         exporter = OTLPSpanExporter(endpoint=endpoint, insecure=True)
         provider = TracerProvider()
         provider.add_span_processor(BatchSpanProcessor(exporter))
-        # Set global provider for context propagation, then get our tracer.
         trace.set_tracer_provider(provider)
         _tracer = provider.get_tracer("humane_proxy")
         logger.info("HumaneProxy telemetry: enabled → %s", endpoint)
@@ -116,17 +140,13 @@ def setup_telemetry(config: Any) -> None:
 
 
 def setup_telemetry_with_memory_exporter() -> "InMemorySpanExporter":
-    """
-    TEST HELPER — wire a fresh InMemorySpanExporter and return it.
+    """TEST HELPER: wire a fresh InMemorySpanExporter and return it.
 
-    Bypasses the OTel global singleton entirely: creates a new TracerProvider,
-    injects it as both the global provider (for context propagation) and
-    as the module-level _tracer directly.
-
-    Each test should call this at the start to get a clean exporter.
+    Creates a new TracerProvider and injects it directly as the module-level
+    tracer so each test gets a clean, isolated exporter.
 
         exporter = setup_telemetry_with_memory_exporter()
-        # ... run pipeline code ...
+        # run pipeline code
         spans = exporter.get_finished_spans()
     """
     global _tracer
@@ -134,14 +154,13 @@ def setup_telemetry_with_memory_exporter() -> "InMemorySpanExporter":
     if not _OTEL_AVAILABLE:
         raise ImportError(
             "opentelemetry is required for tests. "
-            "Install with: pip install humane-proxy[telemetry]"
+            "Install: pip install humane-proxy[telemetry]"
         )
 
     memory_exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(memory_exporter))
     trace.set_tracer_provider(provider)
-    # IMPORTANT: get tracer from THIS provider directly, not from global.
     _tracer = provider.get_tracer("humane_proxy")
     return memory_exporter
 
@@ -154,20 +173,24 @@ def get_tracer() -> Any:
     return _tracer
 
 
-
-# The decorator
-
+# ---------------------------------------------------------------------------
+# Public: decorator
+# ---------------------------------------------------------------------------
 
 def traced_stage(span_name: str) -> Callable:
-    """
-    Wrap a pipeline stage method in an OTel span.
-
-    Works transparently on both sync and async functions.
+    """Wrap a sync or async pipeline method in an OTel span.
 
     Span attributes are populated from the function return value (dict).
     Only privacy-safe keys are written — never raw message text.
-
     Exceptions are recorded on the span and re-raised.
+
+    Example::
+
+        @traced_stage("stage1.heuristics")
+        def run(self, text: str, session_id: str = "") -> dict: ...
+
+        @traced_stage("pipeline.classify")
+        async def classify(self, text: str, session_id: str) -> PipelineResult: ...
     """
     def decorator(fn: Callable) -> Callable:
         if asyncio.iscoroutinefunction(fn):
@@ -199,9 +222,12 @@ def traced_stage(span_name: str) -> Callable:
     return decorator
 
 
+# ---------------------------------------------------------------------------
 # Private helpers
+# ---------------------------------------------------------------------------
 
-_SAFE_ATTRIBUTES = {
+# These are the ONLY keys ever written to spans.  Never raw message text.
+_SAFE_ATTRIBUTES: dict[str, str] = {
     "session_id":     "humane_proxy.session_id",
     "category":       "humane_proxy.category",
     "score":          "humane_proxy.final_score",
@@ -212,27 +238,66 @@ _SAFE_ATTRIBUTES = {
 
 
 def _set_safe_attributes(span: Any, result: Any, call_kwargs: dict) -> None:
-    """Populate span with privacy-safe attributes from the result dict."""
+    """Write privacy-safe span attributes from the result.
+
+    Supports three result types:
+    - Plain dict (stage classifiers return dicts)
+    - PipelineResult dataclass (classify / classify_sync return this)
+    - ClassificationResult dataclass (stage3 providers return this)
+    """
     if not _OTEL_AVAILABLE:
         return
 
-    data: dict = result if isinstance(result, dict) else {}
+    data: dict = {}
 
-    # Pull session_id from call kwargs if not present in result.
+    if isinstance(result, dict):
+        # Stage classifiers return plain dicts.
+        data = result
+
+    elif hasattr(result, "classification"):
+        # PipelineResult — the final output of classify / classify_sync.
+        # Fields: classification (ClassificationResult), message_hash, trajectory
+        try:
+            cr = result.classification          # ClassificationResult
+            data = {
+                "category":       cr.category,
+                "score":          cr.score,
+                "stage_reached":  cr.stage,
+                "triggers_count": len(cr.triggers),
+                "message_hash":   result.message_hash,
+            }
+        except AttributeError:
+            pass
+
+    elif hasattr(result, "category") and hasattr(result, "score"):
+        # ClassificationResult — returned by stage3 providers.
+        # Fields: category, score, triggers, stage, reasoning
+        try:
+            data = {
+                "category":       result.category,
+                "score":          result.score,
+                "stage_reached":  result.stage,
+                "triggers_count": len(result.triggers),
+            }
+        except AttributeError:
+            pass
+
+    # session_id is a call kwarg, not in the result object.
     if "session_id" not in data and "session_id" in call_kwargs:
-        data = {**data, "session_id": call_kwargs["session_id"]}
+        data["session_id"] = call_kwargs["session_id"]
 
     for result_key, attr_name in _SAFE_ATTRIBUTES.items():
-        if result_key in data and data[result_key] is not None:
-            val = data[result_key]
-            span.set_attribute(
-                attr_name,
-                val if isinstance(val, (str, bool, int, float)) else str(val),
-            )
+        val = data.get(result_key)
+        if val is None:
+            continue
+        span.set_attribute(
+            attr_name,
+            val if isinstance(val, (str, bool, int, float)) else str(val),
+        )
 
 
 def _record_exception(span: Any, exc: Exception) -> None:
-    """Record exception on span if OTel is available."""
+    """Record exception on span without letting telemetry break the main flow."""
     if not _OTEL_AVAILABLE:
         return
     try:
@@ -240,39 +305,40 @@ def _record_exception(span: Any, exc: Exception) -> None:
         span.record_exception(exc)
         span.set_status(StatusCode.ERROR, str(exc))
     except Exception:
-        pass  # Never let telemetry break the main flow
+        pass
 
 
 def _make_noop_tracer() -> Any:
-    """Return a no-op tracer (OTel built-in or pure Python fallback)."""
+    """Return a no-op tracer — OTel built-in or pure Python fallback."""
     if _OTEL_AVAILABLE:
         from opentelemetry.trace import NoOpTracerProvider
         return NoOpTracerProvider().get_tracer("humane_proxy")
     return _PurePythonNoOpTracer()
 
 
-# Pure Python no-op fallback (used when opentelemetry is not installed)
-
+# ---------------------------------------------------------------------------
+# Pure Python no-op — used when opentelemetry is not installed at all.
+# ---------------------------------------------------------------------------
 
 class _PurePythonNoOpTracer:
-    def start_as_current_span(self, name: str, **kwargs):
-        return _NoOpSpanCtx()
+    def start_as_current_span(self, name: str, **kwargs: Any):
+        return _NoOpCtx()
 
 
-class _NoOpSpanCtx:
+class _NoOpCtx:
     def __enter__(self):
         return _NoOpSpan()
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any):
         pass
 
 
 class _NoOpSpan:
-    def set_attribute(self, key, value):
+    def set_attribute(self, key: str, value: Any) -> None:
         pass
 
-    def record_exception(self, exc):
+    def record_exception(self, exc: Exception) -> None:
         pass
 
-    def set_status(self, *args, **kwargs):
+    def set_status(self, *args: Any, **kwargs: Any) -> None:
         pass
