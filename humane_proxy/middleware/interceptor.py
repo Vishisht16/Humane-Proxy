@@ -49,7 +49,17 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("[HumaneProxy] Admin API could not be loaded.")
 
-    yield
+    try:
+        yield
+    finally:
+        # Flush and shut down the OTel tracer provider cleanly on exit.
+        try:
+            from opentelemetry import trace
+            provider = trace.get_tracer_provider()
+            if hasattr(provider, "shutdown"):
+                provider.shutdown()
+        except Exception:
+            pass
 
 
 app = FastAPI(

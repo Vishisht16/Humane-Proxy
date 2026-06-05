@@ -222,6 +222,7 @@ class EmbeddingClassifier:
         self._benign_embeddings = self._model.encode(
             BENIGN_ANCHORS, show_progress_bar=False,
         )
+        
     @traced_stage("stage2.embeddings")
     def classify(self, text: str) -> ClassificationResult:
         """Classify *text* using semantic similarity to anchor sentences.
