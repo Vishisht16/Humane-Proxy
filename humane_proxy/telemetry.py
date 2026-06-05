@@ -193,9 +193,11 @@ def traced_stage(span_name: str) -> Callable:
         async def classify(self, text: str, session_id: str) -> PipelineResult: ...
     """
     def decorator(fn: Callable) -> Callable:
+        """Wrap *fn* with a span named *span_name*, handling sync and async."""
         if asyncio.iscoroutinefunction(fn):
             @functools.wraps(fn)
             async def async_wrapper(*args, **kwargs):
+                """Async span wrapper — creates span, sets attributes, records errors."""
                 tracer = get_tracer()
                 with tracer.start_as_current_span(span_name) as span:
                     try:
@@ -209,6 +211,7 @@ def traced_stage(span_name: str) -> Callable:
         else:
             @functools.wraps(fn)
             def sync_wrapper(*args, **kwargs):
+                """Sync span wrapper — creates span, sets attributes, records errors."""
                 tracer = get_tracer()
                 with tracer.start_as_current_span(span_name) as span:
                     try:
@@ -321,24 +324,46 @@ def _make_noop_tracer() -> Any:
 # ---------------------------------------------------------------------------
 
 class _PurePythonNoOpTracer:
+    """Pure Python no-op tracer used when opentelemetry is not installed.
+
+    Implements the minimal subset of the OTel Tracer API used by
+    :func:`traced_stage` so the decorator works with zero overhead
+    even when the optional dependency is absent.
+    """
+
     def start_as_current_span(self, name: str, **kwargs: Any):
+        """Return a no-op context manager that yields a no-op span."""
         return _NoOpCtx()
 
 
 class _NoOpCtx:
+    """Context manager that yields a :class:`_NoOpSpan` and does nothing else."""
+
     def __enter__(self):
+        """Enter the context and return a no-op span."""
         return _NoOpSpan()
 
     def __exit__(self, *args: Any):
+        """Exit the context without any action."""
         pass
 
 
 class _NoOpSpan:
+    """No-op span whose every method is a silent pass.
+
+    Used as the span object when opentelemetry is not installed,
+    ensuring that all ``span.set_attribute`` / ``span.record_exception``
+    calls in :func:`traced_stage` are safe to make unconditionally.
+    """
+
     def set_attribute(self, key: str, value: Any) -> None:
+        """Accept and silently discard a span attribute."""
         pass
 
     def record_exception(self, exc: Exception) -> None:
+        """Accept and silently discard an exception record."""
         pass
 
     def set_status(self, *args: Any, **kwargs: Any) -> None:
+        """Accept and silently discard a status update."""
         pass

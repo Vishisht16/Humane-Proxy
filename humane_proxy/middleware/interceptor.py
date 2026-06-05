@@ -25,6 +25,7 @@ _pipeline = None
 
 
 def _get_pipeline():
+    """Return the process-level SafetyPipeline singleton, creating it on first call."""
     global _pipeline
     if _pipeline is None:
         from humane_proxy.config import get_config
@@ -71,12 +72,14 @@ app = FastAPI(
 
 
 def _resolve_session_id(payload: dict[str, Any], request: Request) -> str:
+    """Return the session_id from the payload, falling back to the client IP."""
     return payload.get("session_id") or (
         request.client.host if request.client else "unknown"
     )
 
 
 def _extract_last_user_message(payload: dict[str, Any]) -> str:
+    """Return the content of the last user-role message in the payload."""
     messages: list[dict[str, str]] = payload.get("messages", [])
     for msg in reversed(messages):
         if msg.get("role") == "user":
