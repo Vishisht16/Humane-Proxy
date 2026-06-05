@@ -93,3 +93,16 @@ class TestErrorHandling:
             "session_id": "test-empty-v2",
         })
         assert resp.status_code == 400
+
+    def test_empty_request_body_returns_400(self):
+        resp = client.post(
+            "/chat",
+             content="",
+             headers={"Content-Type": "application/json"},
+        )
+
+        assert resp.status_code == 400
+
+        data = resp.json()
+        assert data["status"] == "error"
+        assert "valid JSON" in data["message"]
