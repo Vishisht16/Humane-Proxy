@@ -70,7 +70,8 @@ def _extract_last_user_message(payload: dict[str, Any]) -> str:
         return ""
     for msg in reversed(messages):
         if isinstance(msg, dict) and msg.get("role") == "user":
-            return msg.get("content", "")
+            content = msg.get("content", "")
+            return content if isinstance(content, str) else ""
     return ""
 
 
