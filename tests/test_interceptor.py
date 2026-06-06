@@ -132,6 +132,16 @@ class TestErrorHandling:
         assert resp.json()["status"] == "error"
 
 class TestExtractLastUserMessage:
+    def test_multiple_user_messages_uses_last(self):
+        payload = {
+            "messages": [
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "reply"},
+                {"role": "user", "content": [{"type": "text", "text": "second"}]},
+            ]
+        }
+        assert _extract_last_user_message(payload) == "second"
+
     def test_string_content(self):
         payload = {
             "messages": [
