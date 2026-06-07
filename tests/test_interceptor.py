@@ -106,3 +106,27 @@ class TestErrorHandling:
         data = resp.json()
         assert data["status"] == "error"
         assert "valid JSON" in data["message"]
+
+    def test_messages_is_not_a_list(self):
+        resp = client.post("/chat", json={
+            "session_id": "test-malformed-v2",
+            "messages": "not a list",
+        })
+        assert resp.status_code == 400
+        assert resp.json()["status"] == "error"
+
+    def test_message_item_is_not_a_dict(self):
+        resp = client.post("/chat", json={
+            "session_id": "test-malformed-v2",
+            "messages": ["just a string"],
+        })
+        assert resp.status_code == 400
+        assert resp.json()["status"] == "error"
+
+    def test_message_content_is_not_a_string(self):
+        resp = client.post("/chat", json={
+            "session_id": "test-malformed-v2",
+            "messages": [{"role": "user", "content": {"key": "value"}}],
+        })
+        assert resp.status_code == 400
+        assert resp.json()["status"] == "error"
