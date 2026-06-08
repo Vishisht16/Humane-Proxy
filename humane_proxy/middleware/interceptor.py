@@ -12,6 +12,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from humane_proxy.telemetry import setup_telemetry
 from humane_proxy.escalation.local_db import init_db
 from humane_proxy.escalation.router import escalate, get_self_harm_response
 from json import JSONDecodeError
@@ -25,6 +26,7 @@ _pipeline = None
 
 
 def _get_pipeline():
+    """Return the process-level SafetyPipeline singleton, creating it on first call."""
     global _pipeline
     if _pipeline is None:
         from humane_proxy.config import get_config
@@ -35,6 +37,8 @@ def _get_pipeline():
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    from humane_proxy.config import get_config
+    setup_telemetry(get_config())
     init_db()
     _get_pipeline()
     logger.info("[HumaneProxy] Database initialised. Server is ready.")
@@ -47,7 +51,17 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.warning("[HumaneProxy] Admin API could not be loaded.")
 
-    yield
+    try:
+        yield
+    finally:
+        # Flush and shut down the OTel tracer provider cleanly on exit.
+        try:
+            from opentelemetry import trace
+            provider = trace.get_tracer_provider()
+            if hasattr(provider, "shutdown"):
+                provider.shutdown()
+        except Exception:
+            pass
 
 
 app = FastAPI(
@@ -59,12 +73,14 @@ app = FastAPI(
 
 
 def _resolve_session_id(payload: dict[str, Any], request: Request) -> str:
+    """Return the session_id from the payload, falling back to the client IP."""
     return payload.get("session_id") or (
         request.client.host if request.client else "unknown"
     )
 
 
 def _extract_last_user_message(payload: dict[str, Any]) -> str:
+    """Return the content of the last user-role message in the payload."""
     messages: list[dict[str, str]] = payload.get("messages", [])
     for msg in reversed(messages):
         if msg.get("role") == "user":
