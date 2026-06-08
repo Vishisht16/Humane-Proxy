@@ -28,6 +28,7 @@ import httpx
 
 from humane_proxy.classifiers.models import ClassificationResult
 from humane_proxy.classifiers.stage3.base import Stage3Classifier
+from humane_proxy.telemetry import traced_stage
 
 logger = logging.getLogger("humane_proxy.classifiers.stage3.llamaguard")
 
@@ -67,6 +68,7 @@ class LlamaGuardClassifier(Stage3Classifier):
             "GROQ_API_KEY", os.environ.get("LLM_API_KEY", "")
         )
 
+    @traced_stage("stage3.reasoning_llm")
     async def classify(
         self, text: str, prior: ClassificationResult
     ) -> ClassificationResult:

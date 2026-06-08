@@ -84,3 +84,7 @@ escalation:
     slack_url: ""
     discord_url: ""
     pagerduty_routing_key: ""
+
+telemetry:
+  enabled: false
+  endpoint: "http://localhost:4317"

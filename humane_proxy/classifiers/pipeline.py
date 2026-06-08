@@ -29,7 +29,7 @@ import hashlib
 import logging
 import os
 from typing import Any
-
+from humane_proxy.telemetry import traced_stage
 from humane_proxy.classifiers.models import (
     ClassificationResult,
     PipelineResult,
@@ -181,7 +181,7 @@ class SafetyPipeline:
     # ------------------------------------------------------------------
     # Classification — async (all 3 stages)
     # ------------------------------------------------------------------
-
+    @traced_stage("pipeline.classify")
     async def classify(
         self, text: str, session_id: str
     ) -> PipelineResult:
@@ -231,7 +231,8 @@ class SafetyPipeline:
     # ------------------------------------------------------------------
     # Classification — sync (Stages 1 + 2 only)
     # ------------------------------------------------------------------
-
+    
+    @traced_stage("pipeline.classify")
     def classify_sync(
         self, text: str, session_id: str
     ) -> PipelineResult:
