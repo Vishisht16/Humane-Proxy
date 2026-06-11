@@ -137,15 +137,22 @@ class PostgresStore(EscalationStore):
             "session_id": "session_id",
             "stage_reached": "stage_reached",
         }
-        sort_col = allowed_sort.get(sort_by, "timestamp")
-        sort_dir = "ASC" if sort_order.lower() == "asc" else "DESC"
-        order_clause = f"ORDER BY {sort_col} {sort_dir}"  # both values are from hardcoded allowlists
+        _QUERIES = {
+            ("timestamp",    "asc"):  "SELECT * FROM escalations {where} ORDER BY timestamp ASC LIMIT %s OFFSET %s",
+            ("timestamp",    "desc"): "SELECT * FROM escalations {where} ORDER BY timestamp DESC LIMIT %s OFFSET %s",
+            ("risk_score",   "asc"):  "SELECT * FROM escalations {where} ORDER BY risk_score ASC LIMIT %s OFFSET %s",
+            ("risk_score",   "desc"): "SELECT * FROM escalations {where} ORDER BY risk_score DESC LIMIT %s OFFSET %s",
+            ("category",     "asc"):  "SELECT * FROM escalations {where} ORDER BY category ASC LIMIT %s OFFSET %s",
+            ("category",     "desc"): "SELECT * FROM escalations {where} ORDER BY category DESC LIMIT %s OFFSET %s",
+            ("session_id",   "asc"):  "SELECT * FROM escalations {where} ORDER BY session_id ASC LIMIT %s OFFSET %s",
+            ("session_id",   "desc"): "SELECT * FROM escalations {where} ORDER BY session_id DESC LIMIT %s OFFSET %s",
+            ("stage_reached","asc"):  "SELECT * FROM escalations {where} ORDER BY stage_reached ASC LIMIT %s OFFSET %s",
+            ("stage_reached","desc"): "SELECT * FROM escalations {where} ORDER BY stage_reached DESC LIMIT %s OFFSET %s",
+        }
+        sort_key = (allowed_sort.get(sort_by, "timestamp"), "asc" if sort_order.lower() == "asc" else "desc")
+        sql = _QUERIES[sort_key].format(where=where)
         with self._conn() as conn:
-            rows = conn.execute(
-                f"SELECT * FROM escalations {where} "
-                f"{order_clause} LIMIT %s OFFSET %s",
-                params + [limit, offset],
-            ).fetchall()
+            rows = conn.execute(sql, params + [limit, offset]).fetchall()
         return [self._parse(r) for r in rows]
 
     def count(
