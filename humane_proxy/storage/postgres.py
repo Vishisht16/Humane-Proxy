@@ -122,12 +122,21 @@ class PostgresStore(EscalationStore):
         session_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        date_from: float | None = None,
+        date_to: float | None = None,
+        sort_by: str = "timestamp",
+        sort_order: str = "desc",
     ) -> list[dict[str, Any]]:
-        clauses, params = self._build_where(category, session_id)
+        """Return escalation records matching the filters."""
+        clauses, params = self._build_where(category, session_id, date_from, date_to)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        allowed_sort = {"timestamp", "risk_score", "category", "session_id", "stage_reached"}
+        sort_col = sort_by if sort_by in allowed_sort else "timestamp"
+        sort_dir = "ASC" if sort_order.lower() == "asc" else "DESC"
         with self._conn() as conn:
             rows = conn.execute(
-                f"SELECT * FROM escalations {where} ORDER BY timestamp DESC LIMIT %s OFFSET %s",
+                f"SELECT * FROM escalations {where} "
+                f"ORDER BY {sort_col} {sort_dir} LIMIT %s OFFSET %s",
                 params + [limit, offset],
             ).fetchall()
         return [self._parse(r) for r in rows]
@@ -137,8 +146,11 @@ class PostgresStore(EscalationStore):
         *,
         category: str | None = None,
         session_id: str | None = None,
+        date_from: float | None = None,
+        date_to: float | None = None,
     ) -> int:
-        clauses, params = self._build_where(category, session_id)
+        """Return the number of matching records."""
+        clauses, params = self._build_where(category, session_id, date_from, date_to)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         with self._conn() as conn:
             row = conn.execute(
@@ -162,8 +174,13 @@ class PostgresStore(EscalationStore):
             return cur.rowcount
 
     def stats(self) -> dict[str, Any]:
+        """Return aggregate statistics including advanced breakdowns."""
+        from datetime import datetime, timezone
+        cutoff_24h = datetime.now(timezone.utc).timestamp() - 86400
         with self._conn() as conn:
-            total = conn.execute("SELECT COUNT(*) as cnt FROM escalations").fetchone()["cnt"]
+            total = conn.execute(
+                "SELECT COUNT(*) as cnt FROM escalations"
+            ).fetchone()["cnt"]
             by_category = {
                 r["category"]: r["cnt"]
                 for r in conn.execute(
@@ -173,10 +190,48 @@ class PostgresStore(EscalationStore):
             avg = conn.execute(
                 "SELECT AVG(risk_score) as avg FROM escalations"
             ).fetchone()["avg"]
+            by_day = {
+                r["day"]: r["cnt"]
+                for r in conn.execute(
+                    """SELECT TO_CHAR(TO_TIMESTAMP(timestamp), 'YYYY-MM-DD') as day,
+                              COUNT(*) as cnt
+                       FROM escalations GROUP BY day ORDER BY day DESC LIMIT 30"""
+                ).fetchall()
+            }
+            top_sessions = [
+                {"session_id": r["session_id"], "count": r["cnt"],
+                 "avg_score": round(r["avg_score"] or 0, 3)}
+                for r in conn.execute(
+                    """SELECT session_id, COUNT(*) as cnt, AVG(risk_score) as avg_score
+                       FROM escalations GROUP BY session_id
+                       ORDER BY cnt DESC LIMIT 10"""
+                ).fetchall()
+            ]
+            by_stage = {
+                r["stage_reached"]: r["cnt"]
+                for r in conn.execute(
+                    "SELECT stage_reached, COUNT(*) as cnt FROM escalations GROUP BY stage_reached"
+                ).fetchall()
+            }
+            hourly = {
+                r["hour"]: r["cnt"]
+                for r in conn.execute(
+                    """SELECT TO_CHAR(TO_TIMESTAMP(timestamp), 'HH24') as hour,
+                              COUNT(*) as cnt
+                       FROM escalations WHERE timestamp >= %s
+                       GROUP BY hour ORDER BY hour""",
+                    (cutoff_24h,),
+                ).fetchall()
+            }
         return {
             "total_escalations": total,
             "by_category": by_category,
             "average_risk_score": round(avg or 0.0, 3),
+            "by_day": by_day,
+            "top_sessions": top_sessions,
+            "by_stage": by_stage,
+            "hourly_last_24h": hourly,
+            "limited_stats": False,
         }
 
     def check_rate_limit(self, session_id: str) -> bool:
@@ -190,8 +245,12 @@ class PostgresStore(EscalationStore):
 
     @staticmethod
     def _build_where(
-        category: str | None, session_id: str | None,
+        category: str | None,
+        session_id: str | None,
+        date_from: float | None = None,
+        date_to: float | None = None,
     ) -> tuple[list[str], list[Any]]:
+        """Build WHERE clauses and params from filters."""
         clauses: list[str] = []
         params: list[Any] = []
         if category:
@@ -200,6 +259,12 @@ class PostgresStore(EscalationStore):
         if session_id:
             clauses.append("session_id = %s")
             params.append(session_id)
+        if date_from is not None:
+            clauses.append("timestamp >= %s")
+            params.append(date_from)
+        if date_to is not None:
+            clauses.append("timestamp <= %s")
+            params.append(date_to)
         return clauses, params
 
     @staticmethod

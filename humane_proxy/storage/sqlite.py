@@ -132,13 +132,24 @@ class SQLiteStore(EscalationStore):
         session_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        date_from: float | None = None,
+        date_to: float | None = None,
+        sort_by: str = "timestamp",
+        sort_order: str = "desc",
     ) -> list[dict[str, Any]]:
-        clauses, params = self._build_where(category, session_id)
+        """Return escalation records matching the filters."""
+        clauses, params = self._build_where(
+            category, session_id, date_from, date_to
+        )
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        allowed_sort = {"timestamp", "risk_score", "category", "session_id", "stage_reached"}
+        sort_col = sort_by if sort_by in allowed_sort else "timestamp"
+        sort_dir = "ASC" if sort_order.lower() == "asc" else "DESC"
         conn = self._conn()
         try:
             rows = conn.execute(
-                f"SELECT * FROM escalations {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM escalations {where} "
+                f"ORDER BY {sort_col} {sort_dir} LIMIT ? OFFSET ?",
                 params + [limit, offset],
             ).fetchall()
         finally:
@@ -150,8 +161,13 @@ class SQLiteStore(EscalationStore):
         *,
         category: str | None = None,
         session_id: str | None = None,
+        date_from: float | None = None,
+        date_to: float | None = None,
     ) -> int:
-        clauses, params = self._build_where(category, session_id)
+        """Return the number of matching records."""
+        clauses, params = self._build_where(
+            category, session_id, date_from, date_to
+        )
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         conn = self._conn()
         try:
@@ -183,6 +199,8 @@ class SQLiteStore(EscalationStore):
             conn.close()
 
     def stats(self) -> dict[str, Any]:
+        """Return aggregate statistics including advanced breakdowns."""
+        from datetime import datetime, timezone
         conn = self._conn()
         try:
             total = conn.execute("SELECT COUNT(*) FROM escalations").fetchone()[0]
@@ -192,12 +210,39 @@ class SQLiteStore(EscalationStore):
             avg_score = conn.execute(
                 "SELECT AVG(risk_score) FROM escalations"
             ).fetchone()[0]
+            by_day = dict(conn.execute(
+                """SELECT date(timestamp, 'unixepoch') as day, COUNT(*)
+                   FROM escalations GROUP BY day ORDER BY day DESC LIMIT 30"""
+            ).fetchall())
+            top_sessions = [
+                {"session_id": s, "count": c, "avg_score": round(a or 0, 3)}
+                for s, c, a in conn.execute(
+                    """SELECT session_id, COUNT(*) as cnt, AVG(risk_score) as avg_score
+                       FROM escalations GROUP BY session_id
+                       ORDER BY cnt DESC LIMIT 10"""
+                ).fetchall()
+            ]
+            by_stage = dict(conn.execute(
+                "SELECT stage_reached, COUNT(*) FROM escalations GROUP BY stage_reached"
+            ).fetchall())
+            cutoff_24h = datetime.now(timezone.utc).timestamp() - 86400
+            hourly = dict(conn.execute(
+                """SELECT strftime('%H', timestamp, 'unixepoch') as hour, COUNT(*)
+                   FROM escalations WHERE timestamp >= ?
+                   GROUP BY hour ORDER BY hour""",
+                (cutoff_24h,),
+            ).fetchall())
         finally:
             conn.close()
         return {
             "total_escalations": total,
             "by_category": by_category,
             "average_risk_score": round(avg_score or 0.0, 3),
+            "by_day": by_day,
+            "top_sessions": top_sessions,
+            "by_stage": by_stage,
+            "hourly_last_24h": hourly,
+            "limited_stats": False,
         }
 
     def check_rate_limit(self, session_id: str) -> bool:
