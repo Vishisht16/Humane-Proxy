@@ -44,15 +44,20 @@ class SQLiteStore(EscalationStore):
             self._db_path = sqlite_cfg["path"]
         else:
             self._db_path = _LEGACY_DB_PATH
-        self._rate_limit_max = rate_limit_max
-        self._rate_limit_window = timedelta(hours=rate_limit_window_hours)
+        esc_cfg = config.get("escalation", {})
+        self._rate_limit_max = esc_cfg.get("rate_limit_max", rate_limit_max)
+        self._rate_limit_window = timedelta(
+            hours=esc_cfg.get("rate_limit_window_hours", rate_limit_window_hours)
+        )
 
     def _conn(self) -> sqlite3.Connection:
+        """Open and return a new SQLite connection."""
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def init(self) -> None:
+        """Create the escalations table and indexes if they do not exist."""
         conn = self._conn()
         try:
             with conn:
@@ -77,7 +82,6 @@ class SQLiteStore(EscalationStore):
                     ON escalations (session_id, timestamp)
                     """
                 )
-                # Migration: add columns if upgrading from older versions.
                 for col, defn in [
                     ("message_hash", "TEXT"),
                     ("stage_reached", "INTEGER DEFAULT 1"),
@@ -101,6 +105,7 @@ class SQLiteStore(EscalationStore):
         stage_reached: int = 1,
         reasoning: str | None = None,
     ) -> None:
+        """Insert one escalation record."""
         conn = self._conn()
         try:
             with conn:
@@ -138,9 +143,7 @@ class SQLiteStore(EscalationStore):
         sort_order: str = "desc",
     ) -> list[dict[str, Any]]:
         """Return escalation records matching the filters."""
-        clauses, params = self._build_where(
-            category, session_id, date_from, date_to
-        )
+        clauses, params = self._build_where(category, session_id, date_from, date_to)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         allowed_sort = {"timestamp", "risk_score", "category", "session_id", "stage_reached"}
         sort_col = sort_by if sort_by in allowed_sort else "timestamp"
@@ -165,9 +168,7 @@ class SQLiteStore(EscalationStore):
         date_to: float | None = None,
     ) -> int:
         """Return the number of matching records."""
-        clauses, params = self._build_where(
-            category, session_id, date_from, date_to
-        )
+        clauses, params = self._build_where(category, session_id, date_from, date_to)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         conn = self._conn()
         try:
@@ -179,6 +180,7 @@ class SQLiteStore(EscalationStore):
         return row[0] if row else 0
 
     def get_by_id(self, escalation_id: int) -> dict[str, Any] | None:
+        """Return a single escalation record by primary key, or None."""
         conn = self._conn()
         try:
             row = conn.execute(
@@ -189,6 +191,7 @@ class SQLiteStore(EscalationStore):
         return self._row_to_dict(row) if row else None
 
     def delete_session(self, session_id: str) -> int:
+        """Delete all records for a session and return the count deleted."""
         conn = self._conn()
         try:
             with conn:
@@ -200,7 +203,7 @@ class SQLiteStore(EscalationStore):
 
     def stats(self) -> dict[str, Any]:
         """Return aggregate statistics including advanced breakdowns."""
-        from datetime import datetime, timezone
+        cutoff_24h = datetime.now(timezone.utc).timestamp() - 86400
         conn = self._conn()
         try:
             total = conn.execute("SELECT COUNT(*) FROM escalations").fetchone()[0]
@@ -225,7 +228,6 @@ class SQLiteStore(EscalationStore):
             by_stage = dict(conn.execute(
                 "SELECT stage_reached, COUNT(*) FROM escalations GROUP BY stage_reached"
             ).fetchall())
-            cutoff_24h = datetime.now(timezone.utc).timestamp() - 86400
             hourly = dict(conn.execute(
                 """SELECT strftime('%H', timestamp, 'unixepoch') as hour, COUNT(*)
                    FROM escalations WHERE timestamp >= ?
@@ -246,6 +248,7 @@ class SQLiteStore(EscalationStore):
         }
 
     def check_rate_limit(self, session_id: str) -> bool:
+        """Return True if the session is within the rate limit."""
         cutoff = (datetime.now(timezone.utc) - self._rate_limit_window).timestamp()
         conn = self._conn()
         try:
@@ -262,8 +265,12 @@ class SQLiteStore(EscalationStore):
 
     @staticmethod
     def _build_where(
-        category: str | None, session_id: str | None,
+        category: str | None,
+        session_id: str | None,
+        date_from: float | None = None,
+        date_to: float | None = None,
     ) -> tuple[list[str], list[Any]]:
+        """Build WHERE clauses and params list from filter arguments."""
         clauses: list[str] = []
         params: list[Any] = []
         if category:
@@ -272,6 +279,12 @@ class SQLiteStore(EscalationStore):
         if session_id:
             clauses.append("session_id = ?")
             params.append(session_id)
+        if date_from is not None:
+            clauses.append("timestamp >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            clauses.append("timestamp <= ?")
+            params.append(date_to)
         return clauses, params
 
     _COLS = ["id", "session_id", "category", "risk_score", "triggers",
@@ -279,6 +292,7 @@ class SQLiteStore(EscalationStore):
 
     @classmethod
     def _row_to_dict(cls, row: tuple) -> dict[str, Any]:
+        """Convert a raw SQLite row tuple to a dict with parsed triggers."""
         rec: dict[str, Any] = dict(zip(cls._COLS, row))
         try:
             rec["triggers"] = json.loads(rec["triggers"])
