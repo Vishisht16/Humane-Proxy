@@ -40,6 +40,10 @@ class EscalationStore(ABC):
         session_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        date_from: float | None = None,
+        date_to: float | None = None,
+        sort_by: str = "timestamp",
+        sort_order: str = "desc",
     ) -> list[dict[str, Any]]:
         """Return escalation records matching the filters."""
         ...
@@ -50,6 +54,8 @@ class EscalationStore(ABC):
         *,
         category: str | None = None,
         session_id: str | None = None,
+        date_from: float | None = None,
+        date_to: float | None = None,
     ) -> int:
         """Return the number of matching records."""
         ...
