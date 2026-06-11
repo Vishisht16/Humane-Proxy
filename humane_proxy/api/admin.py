@@ -21,6 +21,7 @@ from __future__ import annotations
 import csv
 import hmac
 import io
+import json
 import logging
 import os
 import time
@@ -149,12 +150,18 @@ def list_escalations(
     ts_to: float | None = None
     if date_from:
         try:
-            ts_from = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc).timestamp()
+            dt = datetime.fromisoformat(date_from)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            ts_from = dt.astimezone(timezone.utc).timestamp()
         except ValueError:
             raise HTTPException(400, f"Invalid date_from format: {date_from}")
     if date_to:
         try:
-            ts_to = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc).timestamp()
+            dt = datetime.fromisoformat(date_to)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            ts_to = dt.astimezone(timezone.utc).timestamp()
         except ValueError:
             raise HTTPException(400, f"Invalid date_to format: {date_to}")
 
@@ -205,7 +212,11 @@ def export_escalations(
     writer = csv.DictWriter(output, fieldnames=_COLS, extrasaction="ignore")
     writer.writeheader()
     for item in items:
-        writer.writerow(item)
+        row = dict(item)
+        # Normalize triggers to JSON string for stable CSV output.
+        if isinstance(row.get("triggers"), list):
+            row["triggers"] = json.dumps(row["triggers"])
+        writer.writerow(row)
 
     output.seek(0)
     return StreamingResponse(

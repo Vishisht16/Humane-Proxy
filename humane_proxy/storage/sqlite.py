@@ -145,14 +145,21 @@ class SQLiteStore(EscalationStore):
         """Return escalation records matching the filters."""
         clauses, params = self._build_where(category, session_id, date_from, date_to)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        allowed_sort = {"timestamp", "risk_score", "category", "session_id", "stage_reached"}
-        sort_col = sort_by if sort_by in allowed_sort else "timestamp"
+        allowed_sort = {
+            "timestamp": "timestamp",
+            "risk_score": "risk_score",
+            "category": "category",
+            "session_id": "session_id",
+            "stage_reached": "stage_reached",
+        }
+        sort_col = allowed_sort.get(sort_by, "timestamp")
         sort_dir = "ASC" if sort_order.lower() == "asc" else "DESC"
+        order_clause = f"ORDER BY {sort_col} {sort_dir}"  # both values are from hardcoded allowlists
         conn = self._conn()
         try:
             rows = conn.execute(
                 f"SELECT * FROM escalations {where} "
-                f"ORDER BY {sort_col} {sort_dir} LIMIT ? OFFSET ?",
+                f"{order_clause} LIMIT ? OFFSET ?",
                 params + [limit, offset],
             ).fetchall()
         finally:
