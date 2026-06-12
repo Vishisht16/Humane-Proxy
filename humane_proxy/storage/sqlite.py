@@ -44,15 +44,20 @@ class SQLiteStore(EscalationStore):
             self._db_path = sqlite_cfg["path"]
         else:
             self._db_path = _LEGACY_DB_PATH
-        self._rate_limit_max = rate_limit_max
-        self._rate_limit_window = timedelta(hours=rate_limit_window_hours)
+        esc_cfg = config.get("escalation", {})
+        self._rate_limit_max = esc_cfg.get("rate_limit_max", rate_limit_max)
+        self._rate_limit_window = timedelta(
+            hours=esc_cfg.get("rate_limit_window_hours", rate_limit_window_hours)
+        )
 
     def _conn(self) -> sqlite3.Connection:
+        """Open and return a new SQLite connection."""
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def init(self) -> None:
+        """Create the escalations table and indexes if they do not exist."""
         conn = self._conn()
         try:
             with conn:
@@ -77,7 +82,6 @@ class SQLiteStore(EscalationStore):
                     ON escalations (session_id, timestamp)
                     """
                 )
-                # Migration: add columns if upgrading from older versions.
                 for col, defn in [
                     ("message_hash", "TEXT"),
                     ("stage_reached", "INTEGER DEFAULT 1"),
@@ -101,6 +105,7 @@ class SQLiteStore(EscalationStore):
         stage_reached: int = 1,
         reasoning: str | None = None,
     ) -> None:
+        """Insert one escalation record."""
         conn = self._conn()
         try:
             with conn:
@@ -132,15 +137,40 @@ class SQLiteStore(EscalationStore):
         session_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        date_from: float | None = None,
+        date_to: float | None = None,
+        sort_by: str = "timestamp",
+        sort_order: str = "desc",
     ) -> list[dict[str, Any]]:
-        clauses, params = self._build_where(category, session_id)
+        """Return escalation records matching the filters."""
+        clauses, params = self._build_where(category, session_id, date_from, date_to)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        allowed_sort = {
+            "timestamp": "timestamp",
+            "risk_score": "risk_score",
+            "category": "category",
+            "session_id": "session_id",
+            "stage_reached": "stage_reached",
+        }
+        # Build a fully static SQL string by selecting from a hardcoded map.
+        # This prevents CodeQL from flagging user-controlled values in the query.
+        _QUERIES = {
+            ("timestamp",    "asc"):  "SELECT * FROM escalations {where} ORDER BY timestamp ASC LIMIT ? OFFSET ?",
+            ("timestamp",    "desc"): "SELECT * FROM escalations {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+            ("risk_score",   "asc"):  "SELECT * FROM escalations {where} ORDER BY risk_score ASC LIMIT ? OFFSET ?",
+            ("risk_score",   "desc"): "SELECT * FROM escalations {where} ORDER BY risk_score DESC LIMIT ? OFFSET ?",
+            ("category",     "asc"):  "SELECT * FROM escalations {where} ORDER BY category ASC LIMIT ? OFFSET ?",
+            ("category",     "desc"): "SELECT * FROM escalations {where} ORDER BY category DESC LIMIT ? OFFSET ?",
+            ("session_id",   "asc"):  "SELECT * FROM escalations {where} ORDER BY session_id ASC LIMIT ? OFFSET ?",
+            ("session_id",   "desc"): "SELECT * FROM escalations {where} ORDER BY session_id DESC LIMIT ? OFFSET ?",
+            ("stage_reached","asc"):  "SELECT * FROM escalations {where} ORDER BY stage_reached ASC LIMIT ? OFFSET ?",
+            ("stage_reached","desc"): "SELECT * FROM escalations {where} ORDER BY stage_reached DESC LIMIT ? OFFSET ?",
+        }
+        sort_key = (allowed_sort.get(sort_by, "timestamp"), "asc" if sort_order.lower() == "asc" else "desc")
+        sql = _QUERIES[sort_key].format(where=where)
         conn = self._conn()
         try:
-            rows = conn.execute(
-                f"SELECT * FROM escalations {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                params + [limit, offset],
-            ).fetchall()
+            rows = conn.execute(sql, params + [limit, offset]).fetchall()
         finally:
             conn.close()
         return [self._row_to_dict(r) for r in rows]
@@ -150,8 +180,11 @@ class SQLiteStore(EscalationStore):
         *,
         category: str | None = None,
         session_id: str | None = None,
+        date_from: float | None = None,
+        date_to: float | None = None,
     ) -> int:
-        clauses, params = self._build_where(category, session_id)
+        """Return the number of matching records."""
+        clauses, params = self._build_where(category, session_id, date_from, date_to)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         conn = self._conn()
         try:
@@ -163,6 +196,7 @@ class SQLiteStore(EscalationStore):
         return row[0] if row else 0
 
     def get_by_id(self, escalation_id: int) -> dict[str, Any] | None:
+        """Return a single escalation record by primary key, or None."""
         conn = self._conn()
         try:
             row = conn.execute(
@@ -173,6 +207,7 @@ class SQLiteStore(EscalationStore):
         return self._row_to_dict(row) if row else None
 
     def delete_session(self, session_id: str) -> int:
+        """Delete all records for a session and return the count deleted."""
         conn = self._conn()
         try:
             with conn:
@@ -183,6 +218,8 @@ class SQLiteStore(EscalationStore):
             conn.close()
 
     def stats(self) -> dict[str, Any]:
+        """Return aggregate statistics including advanced breakdowns."""
+        cutoff_24h = datetime.now(timezone.utc).timestamp() - 86400
         conn = self._conn()
         try:
             total = conn.execute("SELECT COUNT(*) FROM escalations").fetchone()[0]
@@ -192,15 +229,42 @@ class SQLiteStore(EscalationStore):
             avg_score = conn.execute(
                 "SELECT AVG(risk_score) FROM escalations"
             ).fetchone()[0]
+            by_day = dict(conn.execute(
+                """SELECT date(timestamp, 'unixepoch') as day, COUNT(*)
+                   FROM escalations GROUP BY day ORDER BY day DESC LIMIT 30"""
+            ).fetchall())
+            top_sessions = [
+                {"session_id": s, "count": c, "avg_score": round(a or 0, 3)}
+                for s, c, a in conn.execute(
+                    """SELECT session_id, COUNT(*) as cnt, AVG(risk_score) as avg_score
+                       FROM escalations GROUP BY session_id
+                       ORDER BY cnt DESC LIMIT 10"""
+                ).fetchall()
+            ]
+            by_stage = dict(conn.execute(
+                "SELECT stage_reached, COUNT(*) FROM escalations GROUP BY stage_reached"
+            ).fetchall())
+            hourly = dict(conn.execute(
+                """SELECT strftime('%H', timestamp, 'unixepoch') as hour, COUNT(*)
+                   FROM escalations WHERE timestamp >= ?
+                   GROUP BY hour ORDER BY hour""",
+                (cutoff_24h,),
+            ).fetchall())
         finally:
             conn.close()
         return {
             "total_escalations": total,
             "by_category": by_category,
             "average_risk_score": round(avg_score or 0.0, 3),
+            "by_day": by_day,
+            "top_sessions": top_sessions,
+            "by_stage": by_stage,
+            "hourly_last_24h": hourly,
+            "limited_stats": False,
         }
 
     def check_rate_limit(self, session_id: str) -> bool:
+        """Return True if the session is within the rate limit."""
         cutoff = (datetime.now(timezone.utc) - self._rate_limit_window).timestamp()
         conn = self._conn()
         try:
@@ -217,8 +281,12 @@ class SQLiteStore(EscalationStore):
 
     @staticmethod
     def _build_where(
-        category: str | None, session_id: str | None,
+        category: str | None,
+        session_id: str | None,
+        date_from: float | None = None,
+        date_to: float | None = None,
     ) -> tuple[list[str], list[Any]]:
+        """Build WHERE clauses and params list from filter arguments."""
         clauses: list[str] = []
         params: list[Any] = []
         if category:
@@ -227,6 +295,12 @@ class SQLiteStore(EscalationStore):
         if session_id:
             clauses.append("session_id = ?")
             params.append(session_id)
+        if date_from is not None:
+            clauses.append("timestamp >= ?")
+            params.append(date_from)
+        if date_to is not None:
+            clauses.append("timestamp <= ?")
+            params.append(date_to)
         return clauses, params
 
     _COLS = ["id", "session_id", "category", "risk_score", "triggers",
@@ -234,6 +308,7 @@ class SQLiteStore(EscalationStore):
 
     @classmethod
     def _row_to_dict(cls, row: tuple) -> dict[str, Any]:
+        """Convert a raw SQLite row tuple to a dict with parsed triggers."""
         rec: dict[str, Any] = dict(zip(cls._COLS, row))
         try:
             rec["triggers"] = json.loads(rec["triggers"])

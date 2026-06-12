@@ -24,7 +24,6 @@ import io
 import json
 import logging
 import os
-import sqlite3
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -33,7 +32,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from humane_proxy.escalation.local_db import _get_db_path
+from humane_proxy.storage.factory import get_store
 
 logger = logging.getLogger("humane_proxy.api.admin")
 
@@ -71,27 +70,6 @@ def _require_admin(
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-_COLS = ["id", "session_id", "category", "risk_score", "triggers",
-         "timestamp", "message_hash", "stage_reached", "reasoning"]
-
-
-def _row_to_dict(row: tuple) -> dict[str, Any]:
-    rec: dict[str, Any] = dict(zip(_COLS, row))
-    try:
-        rec["triggers"] = json.loads(rec["triggers"])
-    except Exception:
-        pass
-    return rec
-
-
-def _get_conn() -> sqlite3.Connection:
-    return sqlite3.connect(_get_db_path(), check_same_thread=False)
-
-
-# ---------------------------------------------------------------------------
 # Health check (no auth required)
 # ---------------------------------------------------------------------------
 
@@ -123,7 +101,6 @@ def get_active_config(_: str = Depends(_require_admin)) -> dict:
 
     config = copy.deepcopy(get_config())
 
-    # Redact sensitive values.
     _REDACT_PATHS = [
         ("admin", "api_key"),
         ("escalation", "webhooks", "slack_url"),
@@ -144,7 +121,6 @@ def get_active_config(_: str = Depends(_require_admin)) -> dict:
             if key in node and node[key]:
                 node[key] = "***REDACTED***"
 
-    # Redact email password.
     email_cfg = config.get("escalation", {}).get("webhooks", {}).get("email", {})
     if isinstance(email_cfg, dict) and email_cfg.get("password"):
         email_cfg["password"] = "***REDACTED***"
@@ -153,7 +129,7 @@ def get_active_config(_: str = Depends(_require_admin)) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Escalations list
 # ---------------------------------------------------------------------------
 
 @router.get("/escalations")
@@ -169,53 +145,49 @@ def list_escalations(
     _: str = Depends(_require_admin),
 ) -> dict:
     """List escalation records, filterable and paginated."""
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    if category:
-        clauses.append("category = ?")
-        params.append(category)
-    if session_id:
-        clauses.append("session_id = ?")
-        params.append(session_id)
+    # Validate date filters early before hitting the store.
+    ts_from: float | None = None
+    ts_to: float | None = None
     if date_from:
         try:
-            dt = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
-            clauses.append("timestamp >= ?")
-            params.append(dt.timestamp())
+            dt = datetime.fromisoformat(date_from)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            ts_from = dt.astimezone(timezone.utc).timestamp()
         except ValueError:
             raise HTTPException(400, f"Invalid date_from format: {date_from}")
     if date_to:
         try:
-            dt = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc)
-            clauses.append("timestamp <= ?")
-            params.append(dt.timestamp())
+            dt = datetime.fromisoformat(date_to)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            ts_to = dt.astimezone(timezone.utc).timestamp()
         except ValueError:
             raise HTTPException(400, f"Invalid date_to format: {date_to}")
 
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-
-    allowed_sort = {"timestamp", "risk_score", "category", "session_id", "stage_reached"}
-    sort_col = sort_by if sort_by in allowed_sort else "timestamp"
-    sort_dir = "ASC" if sort_order.lower() == "asc" else "DESC"
-
-    conn = _get_conn()
-    try:
-        rows = conn.execute(
-            f"SELECT * FROM escalations {where} ORDER BY {sort_col} {sort_dir} LIMIT ? OFFSET ?",
-            params + [limit, offset],
-        ).fetchall()
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM escalations {where}", params
-        ).fetchone()[0]
-    finally:
-        conn.close()
+    store = get_store()
+    items = store.query(
+        category=category,
+        session_id=session_id,
+        limit=limit,
+        offset=offset,
+        date_from=ts_from,
+        date_to=ts_to,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+    total = store.count(
+        category=category,
+        session_id=session_id,
+        date_from=ts_from,
+        date_to=ts_to,
+    )
 
     return {
         "total": total,
         "limit": limit,
         "offset": offset,
-        "items": [_row_to_dict(r) for r in rows],
+        "items": items,
     }
 
 
@@ -230,31 +202,20 @@ def export_escalations(
     _: str = Depends(_require_admin),
 ) -> StreamingResponse:
     """Export all matching escalations as CSV."""
-    clauses: list[str] = []
-    params: list[Any] = []
+    store = get_store()
+    items = store.query(category=category, session_id=session_id, limit=10_000, offset=0)
 
-    if category:
-        clauses.append("category = ?")
-        params.append(category)
-    if session_id:
-        clauses.append("session_id = ?")
-        params.append(session_id)
-
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-
-    conn = _get_conn()
-    try:
-        rows = conn.execute(
-            f"SELECT * FROM escalations {where} ORDER BY timestamp DESC",
-            params,
-        ).fetchall()
-    finally:
-        conn.close()
+    _COLS = ["id", "session_id", "category", "risk_score", "triggers",
+             "timestamp", "message_hash", "stage_reached", "reasoning"]
 
     output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(_COLS)
-    for row in rows:
+    writer = csv.DictWriter(output, fieldnames=_COLS, extrasaction="ignore")
+    writer.writeheader()
+    for item in items:
+        row = dict(item)
+        # Normalize triggers to JSON string for stable CSV output.
+        if isinstance(row.get("triggers"), list):
+            row["triggers"] = json.dumps(row["triggers"])
         writer.writerow(row)
 
     output.seek(0)
@@ -265,24 +226,26 @@ def export_escalations(
     )
 
 
+# ---------------------------------------------------------------------------
+# Single escalation
+# ---------------------------------------------------------------------------
+
 @router.get("/escalations/{escalation_id}")
 def get_escalation(
     escalation_id: int,
     _: str = Depends(_require_admin),
 ) -> dict:
     """Get a single escalation record by ID."""
-    conn = _get_conn()
-    try:
-        row = conn.execute(
-            "SELECT * FROM escalations WHERE id = ?", (escalation_id,)
-        ).fetchone()
-    finally:
-        conn.close()
-
-    if row is None:
+    store = get_store()
+    record = store.get_by_id(escalation_id)
+    if record is None:
         raise HTTPException(status_code=404, detail=f"Escalation {escalation_id} not found.")
-    return _row_to_dict(row)
+    return record
 
+
+# ---------------------------------------------------------------------------
+# Session risk
+# ---------------------------------------------------------------------------
 
 @router.get("/sessions/{session_id}/risk")
 def get_session_risk(
@@ -290,23 +253,16 @@ def get_session_risk(
     _: str = Depends(_require_admin),
 ) -> dict:
     """Return escalation history + current trajectory for a session."""
-    conn = _get_conn()
-    try:
-        rows = conn.execute(
-            "SELECT * FROM escalations WHERE session_id = ? ORDER BY timestamp ASC",
-            (session_id,),
-        ).fetchall()
-    finally:
-        conn.close()
+    store = get_store()
+    history = store.query(session_id=session_id, limit=500, offset=0)
 
     from humane_proxy.risk.trajectory import snapshot
-
     trajectory = snapshot(session_id)
 
     return {
         "session_id": session_id,
-        "escalation_count": len(rows),
-        "history": [_row_to_dict(r) for r in rows],
+        "escalation_count": len(history),
+        "history": history,
         "trajectory": {
             "spike_detected": trajectory.spike_detected,
             "trend": trajectory.trend,
@@ -317,59 +273,22 @@ def get_session_risk(
     }
 
 
+# ---------------------------------------------------------------------------
+# Stats
+# ---------------------------------------------------------------------------
+
 @router.get("/stats")
 def get_stats(_: str = Depends(_require_admin)) -> dict:
     """Return aggregate safety statistics with enhanced breakdowns."""
-    conn = _get_conn()
-    try:
-        total = conn.execute("SELECT COUNT(*) FROM escalations").fetchone()[0]
-        by_category = conn.execute(
-            "SELECT category, COUNT(*) FROM escalations GROUP BY category"
-        ).fetchall()
-        by_day = conn.execute(
-            """SELECT date(timestamp, 'unixepoch') as day, COUNT(*)
-               FROM escalations GROUP BY day ORDER BY day DESC LIMIT 30"""
-        ).fetchall()
-        avg_score = conn.execute(
-            "SELECT AVG(risk_score) FROM escalations"
-        ).fetchone()[0]
+    store = get_store()
+    data = store.stats()
+    data["generated_at"] = datetime.now(timezone.utc).isoformat()
+    return data
 
-        # Enhanced: top sessions (most flagged).
-        top_sessions = conn.execute(
-            """SELECT session_id, COUNT(*) as cnt, AVG(risk_score) as avg_score
-               FROM escalations GROUP BY session_id ORDER BY cnt DESC LIMIT 10"""
-        ).fetchall()
 
-        # Enhanced: stage distribution.
-        by_stage = conn.execute(
-            "SELECT stage_reached, COUNT(*) FROM escalations GROUP BY stage_reached"
-        ).fetchall()
-
-        # Enhanced: hourly breakdown (last 24h).
-        cutoff_24h = (datetime.now(timezone.utc).timestamp()) - 86400
-        hourly = conn.execute(
-            """SELECT strftime('%H', timestamp, 'unixepoch') as hour, COUNT(*)
-               FROM escalations WHERE timestamp >= ?
-               GROUP BY hour ORDER BY hour""",
-            (cutoff_24h,),
-        ).fetchall()
-    finally:
-        conn.close()
-
-    return {
-        "total_escalations": total,
-        "by_category": dict(by_category),
-        "by_day": dict(by_day),
-        "average_risk_score": round(avg_score or 0.0, 3),
-        "top_sessions": [
-            {"session_id": s, "count": c, "avg_score": round(a or 0, 3)}
-            for s, c, a in top_sessions
-        ],
-        "by_stage": dict(by_stage),
-        "hourly_last_24h": dict(hourly),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
-
+# ---------------------------------------------------------------------------
+# Delete session
+# ---------------------------------------------------------------------------
 
 @router.delete("/sessions/{session_id}", status_code=204, response_class=Response)
 def delete_session_data(
@@ -377,14 +296,7 @@ def delete_session_data(
     _: str = Depends(_require_admin),
 ) -> Response:
     """Delete all escalation records for a session (privacy right to erasure)."""
-    conn = _get_conn()
-    try:
-        with conn:
-            deleted = conn.execute(
-                "DELETE FROM escalations WHERE session_id = ?", (session_id,)
-            ).rowcount
-    finally:
-        conn.close()
-
+    store = get_store()
+    deleted = store.delete_session(session_id)
     logger.info("Deleted %d records for session %s (admin request)", deleted, session_id)
     return Response(status_code=204)

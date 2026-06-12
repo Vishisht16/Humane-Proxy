@@ -2,13 +2,12 @@
 
 import json
 import time
-from unittest.mock import patch
 
-import pytest
+import pytest # pyright: ignore[reportMissingImports]
 from fastapi.testclient import TestClient
+from fastapi import FastAPI
 
 from humane_proxy.api.admin import router
-from fastapi import FastAPI
 
 # Build a minimal test app
 _test_app = FastAPI()
@@ -23,30 +22,31 @@ def _set_admin_key(monkeypatch):
 
 @pytest.fixture()
 def _seeded_db(tmp_path, monkeypatch):
-    """Create a temp DB with 3 escalation rows."""
+    """Create a temp SQLiteStore with 3 escalation rows and inject via get_store."""
     db_path = tmp_path / "test_admin.db"
-    import sqlite3
-    conn = sqlite3.connect(str(db_path))
-    with conn:
-        conn.execute(
-            """CREATE TABLE escalations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT, category TEXT, risk_score REAL,
-                triggers TEXT, timestamp REAL,
-                message_hash TEXT, stage_reached INTEGER, reasoning TEXT
-            )"""
-        )
-        rows = [
-            ("sess-1", "self_harm", 1.0, '["keyword:kill myself"]', time.time(), None, 1, None),
-            ("sess-2", "criminal_intent", 0.75, '["keyword:how to make a bomb"]', time.time(), None, 1, None),
-            ("sess-1", "self_harm", 1.0, '["pattern:self_annihilation"]', time.time(), None, 2, "LLM reasoning"),
-        ]
-        conn.executemany(
-            "INSERT INTO escalations (session_id, category, risk_score, triggers, timestamp, message_hash, stage_reached, reasoning) VALUES (?,?,?,?,?,?,?,?)",
-            rows,
-        )
-    monkeypatch.setattr("humane_proxy.api.admin._get_db_path", lambda: str(db_path))
-    return db_path
+
+    # Build config pointing at temp DB path.
+    config = {
+        "storage": {"backend": "sqlite", "sqlite": {"path": str(db_path)}},
+        "escalation": {"rate_limit_max": 3, "rate_limit_window_hours": 1},
+    }
+
+    from humane_proxy.storage.sqlite import SQLiteStore
+    store = SQLiteStore(config)
+    store.init()
+
+    # Seed 3 rows directly via the store's log() method.
+    store.log("sess-1", "self_harm", 1.0,
+              ["keyword:kill myself"], message_hash=None, stage_reached=1)
+    store.log("sess-2", "criminal_intent", 0.75,
+              ["keyword:how to make a bomb"], message_hash=None, stage_reached=1)
+    store.log("sess-1", "self_harm", 1.0,
+              ["pattern:self_annihilation"], message_hash=None, stage_reached=2,
+              reasoning="LLM reasoning")
+
+    # Inject the store so admin.py uses it instead of the real singleton.
+    monkeypatch.setattr("humane_proxy.api.admin.get_store", lambda: store)
+    return store
 
 
 class TestAdminAuth:
@@ -116,6 +116,16 @@ class TestStats:
         assert by_cat["self_harm"] == 2
         assert by_cat["criminal_intent"] == 1
 
+    def test_stats_has_advanced_fields(self, _seeded_db):
+        resp = client.get("/admin/stats", headers=self.HEADERS)
+        data = resp.json()
+        assert "by_day" in data
+        assert "top_sessions" in data
+        assert "by_stage" in data
+        assert "hourly_last_24h" in data
+        assert "limited_stats" in data
+        assert data["limited_stats"] is False
+
 
 class TestSessionRisk:
     HEADERS = {"Authorization": "Bearer test-admin-secret"}
@@ -148,6 +158,6 @@ class TestDeleteSession:
         resp = client.delete("/admin/sessions/sess-1", headers=self.HEADERS)
         assert resp.status_code == 204
 
-        # Verify deletion
+        # Verify deletion via list endpoint.
         list_resp = client.get("/admin/escalations?session_id=sess-1", headers=self.HEADERS)
         assert list_resp.json()["total"] == 0

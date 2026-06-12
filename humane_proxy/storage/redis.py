@@ -108,7 +108,17 @@ class RedisStore(EscalationStore):
         session_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        date_from: float | None = None,
+        date_to: float | None = None,
+        sort_by: str = "timestamp",
+        sort_order: str = "desc",
     ) -> list[dict[str, Any]]:
+        """Return escalation records matching the filters.
+
+        Note: date_from, date_to, sort_by, and sort_order are not supported
+        by the Redis backend and are silently ignored.  Use a SQL backend
+        for full filter and sort support.
+        """
         if session_id:
             index_key = self._key("session", session_id)
         elif category:
@@ -130,7 +140,13 @@ class RedisStore(EscalationStore):
         *,
         category: str | None = None,
         session_id: str | None = None,
+        date_from: float | None = None,
+        date_to: float | None = None,
     ) -> int:
+        """Return the number of matching records.
+
+        Note: date_from and date_to are not supported by the Redis backend.
+        """
         if session_id:
             return self._client.zcard(self._key("session", session_id))
         elif category:
@@ -154,8 +170,15 @@ class RedisStore(EscalationStore):
         return len(ids)
 
     def stats(self) -> dict[str, Any]:
+        """Return aggregate statistics.
+
+        Redis can only efficiently return total count and category breakdown.
+        Advanced fields (by_day, top_sessions, by_stage, hourly_last_24h) are
+        returned as empty structures with ``limited_stats: True`` to avoid
+        full-scan performance degradation.  Switch to a SQL backend for full
+        analytics.
+        """
         total = self._client.zcard(self._key("esc_timeline"))
-        # Category counts by scanning category indexes.
         by_category: dict[str, int] = {}
         for key in self._client.scan_iter(match=self._key("category", "*")):
             cat_name = key.replace(self._prefix + "category:", "")
@@ -163,7 +186,12 @@ class RedisStore(EscalationStore):
         return {
             "total_escalations": total,
             "by_category": by_category,
-            "average_risk_score": 0.0,  # Would require full scan; skip for perf.
+            "average_risk_score": 0.0,  # Requires full scan — skipped for Redis.
+            "by_day": {},
+            "top_sessions": [],
+            "by_stage": {},
+            "hourly_last_24h": {},
+            "limited_stats": True,
         }
 
     def check_rate_limit(self, session_id: str) -> bool:
