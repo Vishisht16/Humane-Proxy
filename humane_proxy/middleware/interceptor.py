@@ -82,9 +82,12 @@ def _resolve_session_id(payload: dict[str, Any], request: Request) -> str:
 def _extract_last_user_message(payload: dict[str, Any]) -> str:
     """Return the content of the last user-role message in the payload."""
     messages: list[dict[str, str]] = payload.get("messages", [])
+    if not isinstance(messages, list):
+        return ""
     for msg in reversed(messages):
-        if msg.get("role") == "user":
-            return msg.get("content", "")
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            content = msg.get("content", "")
+            return content if isinstance(content, str) else ""
     return ""
 
 
