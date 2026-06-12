@@ -51,6 +51,7 @@ Jailbreaks and prompt injections are deliberately **not** the concern of this to
 - [Privacy](#privacy)
 - [Installation Extras](#installation-extras)
 - [Compliance & Security](#compliance--security)
+- [Contributors](#contributors)
 - [License](#license)
 
 ---
@@ -690,6 +691,14 @@ HumaneProxy is designed for deployment in regulated environments. See our compli
 
 - **[COMPLIANCE.md](COMPLIANCE.md)** — HIPAA, GDPR, and SOC 2 readiness assessment
 - **[SECURITY.md](.github/SECURITY.md)** — Vulnerability disclosure policy
+
+---
+
+## 👥 Contributors
+
+Thanks to all contributors ❤️
+
+[![Contributors](https://contrib.rocks/image?repo=Vishisht16/Humane-Proxy)](https://github.com/Vishisht16/Humane-Proxy/graphs/contributors)
 
 ---
 
