@@ -134,27 +134,39 @@ humane-proxy mcp-serve --transport http --host 0.0.0.0 --port 3000
 
 HumaneProxy classifies every message through up to **3 stages**, each progressively more capable but also more expensive.
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  Stage 1 — Heuristics                          < 1ms     │
-│  Keyword corpus + intent regex patterns                  │
-│  Always on. Catches clear cases instantly.               │
-│  Early-exit: definitive self_harm → block immediately.   │
-└──────────────────────────────────────────────────────────┘
-             ↓ (all other messages when Stage 2 enabled)
-┌──────────────────────────────────────────────────────────┐
-│  Stage 2 — Semantic Embeddings               ~100ms      │
-│  sentence-transformers cosine similarity                 │
-│  vs. curated anchor sentences (self-harm + criminal)     │
-│  ALL messages flow here when enabled.                    │
-│  Optional: pip install humane-proxy[ml]                  │
-└──────────────────────────────────────────────────────────┘
-             ↓ (still ambiguous)
-┌──────────────────────────────────────────────────────────┐
-│  Stage 3 — Reasoning LLM                     ~1–3s       │
-│  LlamaGuard (Groq) or OpenAI Moderation API              │
-│  Optional: set OPENAI_API_KEY or GROQ_API_KEY            │
-└──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    %% Define styles
+    classDef stage fill:#f4f4f4,stroke:#666,stroke-width:2px,color:#333
+    classDef block fill:#ffebee,stroke:#e53935,stroke-width:2px,color:#b71c1c,font-weight:bold
+    classDef forward fill:#e8f5e9,stroke:#43a047,stroke-width:2px,color:#1b5e20,font-weight:bold
+    classDef external fill:#fff3e0,stroke:#f57c00,stroke-width:2px,stroke-dasharray: 5 5,color:#e65100
+
+    User([User Request]) --> S1
+    
+    S1[Stage 1: Heuristics<br><small>< 1ms</small>]:::stage
+    S2[Stage 2: Semantic Embeddings<br><small>~100ms</small>]:::stage
+    S3[Stage 3: Reasoning LLM<br><small>~1-3s</small>]:::stage
+    
+    Block((Block / Alert<br>Care Response)):::block
+    Forward((Forward to<br>Upstream LLM)):::forward
+    
+    Webhook[[Async Webhook<br>Dispatch]]:::external
+    DB[(DB Logging)]:::external
+
+    S1 -- Definitive self-harm/criminal intent --> Block
+    S1 -- Clear safe --> Forward
+    S1 -- Ambiguous --> S2
+
+    S2 -- Unsafe --> Block
+    S2 -- Clear safe --> Forward
+    S2 -- Ambiguous --> S3
+
+    S3 -- Unsafe --> Block
+    S3 -- Safe --> Forward
+
+    Block -.-> Webhook
+    Block -.-> DB
 ```
 
 ### Configuring the Pipeline
