@@ -154,7 +154,7 @@ flowchart TD
     Webhook[[Async Webhook<br>Dispatch]]:::external
     DB[(DB Logging)]:::external
 
-    S1 -- Definitive self-harm --> Block
+    S1 -- Definitive self-harm/criminal intent --> Block
     S1 -- Clear safe --> Forward
     S1 -- Ambiguous --> S2
 
