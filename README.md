@@ -33,6 +33,28 @@ Jailbreaks and prompt injections are deliberately **not** the concern of this to
 
 ---
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Available On](#available-on)
+- [3-Stage Cascade Pipeline](#3-stage-cascade-pipeline)
+- [Self-Harm Care Response](#self-harm-care-response)
+- [Risk Trajectory & Time-Decay](#risk-trajectory--time-decay)
+- [Alert Webhooks](#alert-webhooks)
+- [CLI Reference](#cli-reference)
+- [GitHub Action — CI/CD Safety Gate](#github-action--cicd-safety-gate)
+- [REST Admin API](#rest-admin-api)
+- [MCP Server (for AI Agents)](#mcp-server-for-ai-agents)
+- [AI Agent Integrations](#ai-agent-integrations)
+- [Configuration Reference](#configuration-reference)
+- [OpenTelemetry Tracing](#opentelemetry-tracing)
+- [Privacy](#privacy)
+- [Installation Extras](#installation-extras)
+- [Compliance & Security](#compliance--security)
+- [License](#license)
+
+---
+
 ## Quick Start
 
 ```bash
