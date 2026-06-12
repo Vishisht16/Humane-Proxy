@@ -101,6 +101,47 @@ class TestTimeDecay:
         result = detect_spike(sid, 0.5)
         assert result is True
 
+    def test_single_entry_history(self):
+        now = time.time()
+        history = deque([
+            (0.7, now)
+        ])
+
+        avg = _weighted_mean(history, now)
+
+        assert abs(avg - 0.7) < 0.01
+
+    def test_empty_history(self):
+        now = time.time()
+        history = deque()
+
+        avg = _weighted_mean(history, now)
+
+        assert avg == 0.0
+
+    def test_extreme_time_delta(self):
+        now = time.time()
+        ten_years_ago = now - (10 * 365 * 24 * 3600)
+
+        history = deque([
+            (0.8, ten_years_ago),
+            (0.2, now),
+        ])
+
+        avg = _weighted_mean(history, now)
+
+        assert avg < 0.3 # Old score should be heavily decayed, so average is close to 0.2.
+
+    def test_future_timestamp(self):
+        now = time.time()
+
+        history = deque([
+            (0.5, now + 3600),
+        ])
+
+        avg = _weighted_mean(history, now)
+
+        assert isinstance(avg, float)
 
 class TestAnalyze:
     def test_returns_trajectory_result(self):
