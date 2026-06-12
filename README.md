@@ -51,7 +51,7 @@ Jailbreaks and prompt injections are deliberately **not** the concern of this to
 - [Privacy](#privacy)
 - [Installation Extras](#installation-extras)
 - [Compliance & Security](#compliance--security)
-- [Contributors](#contributors)
+- [Contributors](#-contributors)
 - [License](#license)
 
 ---
