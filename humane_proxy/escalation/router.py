@@ -14,70 +14,69 @@ logger = logging.getLogger("humane_proxy.escalation")
 # International crisis resource database
 # ---------------------------------------------------------------------------
 
-CARE_RESPONSE_BLOCK = """\
-It sounds like you may be going through something really difficult right now. \
-You are not alone, and there are people who care about you and want to help.
+# International crisis resource database
+# ---------------------------------------------------------------------------
+# Single source of truth: per-country resource blocks, assembled into
+# CARE_RESPONSE_BLOCK below. Keeping these structured (rather than one opaque
+# string) lets an operator optionally surface a specific region's resources
+# first via `safety.categories.self_harm.region`, without dropping the others.
 
-Please reach out to a crisis service near you:
+_CARE_INTRO = (
+    "It sounds like you may be going through something really difficult right now. \\\n"
+    "You are not alone, and there are people who care about you and want to help.\n\n"
+    "Please reach out to a crisis service near you:"
+)
 
-🇺🇸 United States
-  • 988 Suicide & Crisis Lifeline: Call or text 988
-  • Crisis Text Line: Text HOME to 741741
+# Ordered: code -> resource block. Order preserved for the default (no-region) message.
+_CRISIS_RESOURCES: dict[str, str] = {
+    "US": "🇺🇸 United States\n  • 988 Suicide & Crisis Lifeline: Call or text 988\n  • Crisis Text Line: Text HOME to 741741",
+    "IN": "🇮🇳 India\n  • iCall (TISS): 9152987821\n  • Vandrevala Foundation: 1860-2662-345 (24/7)\n  • NIMHANS: 080-46110007",
+    "GB": "🇬🇧 United Kingdom\n  • Samaritans: 116 123 (free, 24/7)\n  • PAPYRUS (youth): 0800 068 4141",
+    "AU": "🇦🇺 Australia\n  • Lifeline: 13 11 14\n  • Beyond Blue: 1300 22 4636",
+    "CA": "🇨🇦 Canada\n  • Talk Suicide Canada: 1-833-456-4566\n  • Crisis Text Line: Text HOME to 686868",
+    "DE": "🇩🇪 Germany\n  • Telefonseelsorge: 0800 111 0 111 (free, 24/7)",
+    "FR": "🇫🇷 France\n  • Suicide Écoute: 01 45 39 40 00\n  • Numéro National Prévention Suicide: 3114",
+    "BR": "🇧🇷 Brazil\n  • CVV (Centro de Valorização da Vida): 188",
+    "ZA": "🇿🇦 South Africa\n  • SADAG: 0800 567 567",
+    "JP": "🇯🇵 Japan\n  • Inochi no Denwa: 0120-783-556",
+    "KR": "🇰🇷 South Korea\n  • Crisis Counseling Hotline: 1393",
+    "ES": "🇪🇸 Spain\n  • Línea de Atención a conducta suicida: 024",
+    "IT": "🇮🇹 Italy\n  • Telefono Amico: 800 274 274",
+    "MX": "🇲🇽 Mexico\n  • SAPTEL: 800 290 0024",
+    "NZ": "🇳🇿 New Zealand\n  • Need to Talk?: 1737",
+}
 
-🇮🇳 India
-  • iCall (TISS): 9152987821
-  • Vandrevala Foundation: 1860-2662-345 (24/7)
-  • NIMHANS: 080-46110007
+_CARE_INTERNATIONAL = (
+    "🌐 International:\n"
+    "  • IASP Crisis Centres: https://www.iasp.info/resources/Crisis_Centres/\n"
+    "  • Befrienders Worldwide: https://www.befrienders.org"
+)
 
-🇬🇧 United Kingdom
-  • Samaritans: 116 123 (free, 24/7)
-  • PAPYRUS (youth): 0800 068 4141
+_CARE_EMERGENCY = (
+    "If you are in immediate danger, please call your local emergency number "
+    "(e.g. 112, 911, 999, 100)."
+)
 
-🇦🇺 Australia
-  • Lifeline: 13 11 14
-  • Beyond Blue: 1300 22 4636
 
-🇨🇦 Canada
-  • Talk Suicide Canada: 1-833-456-4566
-  • Crisis Text Line: Text HOME to 686868
+def _build_care_block(region: str | None = None) -> str:
+    """Assemble the crisis-resource block.
 
-🇩🇪 Germany
-  • Telefonseelsorge: 0800 111 0 111 (free, 24/7)
+    When ``region`` matches a known country code, that country's resources are
+    surfaced first; all other resources still follow. When ``region`` is None
+    or unknown, the full list is returned in the default order.
+    """
+    ordered = list(_CRISIS_RESOURCES.values())
+    if region:
+        block = _CRISIS_RESOURCES.get(region.strip().upper())
+        if block:
+            ordered = [block] + [b for b in ordered if b != block]
+    body = "\n\n".join(ordered)
+    return f"{_CARE_INTRO}\n\n{body}\n\n{_CARE_INTERNATIONAL}\n\n{_CARE_EMERGENCY}"
 
-🇫🇷 France
-  • Suicide Écoute: 01 45 39 40 00
-  • Numéro National Prévention Suicide: 3114
 
-🇧🇷 Brazil
-  • CVV (Centro de Valorização da Vida): 188
-
-🇿🇦 South Africa
-  • SADAG: 0800 567 567
-
-🇯🇵 Japan
-  • Inochi no Denwa: 0120-783-556
-
-🇰🇷 South Korea
-  • Crisis Counseling Hotline: 1393
-
-🇪🇸 Spain
-  • Línea de Atención a conducta suicida: 024
-
-🇮🇹 Italy
-  • Telefono Amico: 800 274 274
-
-🇲🇽 Mexico
-  • SAPTEL: 800 290 0024
-
-🇳🇿 New Zealand
-  • Need to Talk?: 1737
-
-🌐 International:
-  • IASP Crisis Centres: https://www.iasp.info/resources/Crisis_Centres/
-  • Befrienders Worldwide: https://www.befrienders.org
-
-If you are in immediate danger, please call your local emergency number (e.g. 112, 911, 999, 100).\
-"""
+# Default full message (no region). Kept as a module constant for backward
+# compatibility — existing callers and tests reference CARE_RESPONSE_BLOCK.
+CARE_RESPONSE_BLOCK = _build_care_block()
 
 CARE_CONTEXT_INJECTION = (
     "\n[SYSTEM NOTE: The user's message may indicate emotional distress or self-harm ideation. "
@@ -88,16 +87,21 @@ CARE_CONTEXT_INJECTION = (
 
 
 def _get_care_response() -> str:
-    """Return the configured block message, falling back to the built-in one."""
-    cfg = get_config()
-    custom = (
-        cfg.get("safety", {})
-        .get("categories", {})
-        .get("self_harm", {})
-        .get("block_message", "")
-    )
-    return custom.strip() if custom else CARE_RESPONSE_BLOCK
+    """Return the configured block message, falling back to the built-in one.
 
+    Honors an optional ``safety.categories.self_harm.region`` setting, which
+    surfaces that country's resources first. A custom ``block_message`` still
+    takes precedence over both.
+    """
+    cfg = get_config()
+    self_harm = cfg.get("safety", {}).get("categories", {}).get("self_harm", {})
+    custom = self_harm.get("block_message", "")
+    if custom and custom.strip():
+        return custom.strip()
+    region = self_harm.get("region", "")
+    if region:
+        return _build_care_block(region)
+    return CARE_RESPONSE_BLOCK
 
 def _get_response_mode() -> str:
     """Return 'block' (default) or 'forward'."""

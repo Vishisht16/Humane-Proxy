@@ -124,3 +124,66 @@ class TestCustomBlockMessage:
             result = get_self_harm_response()
         assert result["message"] == "Custom care message for tests."
 
+class TestRegionAwareCareResponse:
+    """Optional region surfaces the matching country's resources first."""
+
+    def _region_config(self, region):
+        return {
+            "safety": {
+                "categories": {
+                    "self_harm": {
+                        "response_mode": "block",
+                        "region": region,
+                    }
+                }
+            }
+        }
+
+    def test_no_region_returns_full_default_block(self):
+        # Sanity: with no region set, the message is the unchanged default.
+        result = get_self_harm_response()
+        assert result["message"] == CARE_RESPONSE_BLOCK
+
+    def test_region_surfaces_matching_country_first(self):
+        with patch("humane_proxy.escalation.router.get_config", return_value=self._region_config("IN")):
+            result = get_self_harm_response()
+        body = result["message"].split("Please reach out to a crisis service near you:")[1].lstrip()
+        # India's block should come first after the intro.
+        assert body.startswith("🇮🇳")
+
+    def test_region_still_includes_other_countries(self):
+        with patch("humane_proxy.escalation.router.get_config", return_value=self._region_config("IN")):
+            result = get_self_harm_response()
+        # Surfacing first must not drop the others.
+        assert "988" in result["message"]          # US
+        assert "Samaritans" in result["message"]    # UK
+        assert "iasp.info" in result["message"]      # international fallback
+
+    def test_region_is_case_insensitive(self):
+        with patch("humane_proxy.escalation.router.get_config", return_value=self._region_config("in")):
+            result = get_self_harm_response()
+        body = result["message"].split("Please reach out to a crisis service near you:")[1].lstrip()
+        assert body.startswith("🇮🇳")
+
+    def test_unknown_region_falls_back_to_full_default(self):
+        with patch("humane_proxy.escalation.router.get_config", return_value=self._region_config("ZZ")):
+            result = get_self_harm_response()
+        # Unknown code → unchanged default order.
+        assert result["message"] == CARE_RESPONSE_BLOCK
+
+    def test_custom_block_message_takes_precedence_over_region(self):
+        cfg = {
+            "safety": {
+                "categories": {
+                    "self_harm": {
+                        "response_mode": "block",
+                        "region": "IN",
+                        "block_message": "Custom care message for tests.",
+                    }
+                }
+            }
+        }
+        with patch("humane_proxy.escalation.router.get_config", return_value=cfg):
+            result = get_self_harm_response()
+        assert result["message"] == "Custom care message for tests."
+        
