@@ -187,3 +187,8 @@ class TestRegionAwareCareResponse:
             result = get_self_harm_response()
         assert result["message"] == "Custom care message for tests."
         
+    def test_intro_has_no_stray_backslash(self):
+        # Regression: the intro must read as a seamless sentence, not contain
+        # a literal backslash or a mid-sentence line break before "You are not alone".
+        assert "right now. You are not alone" in CARE_RESPONSE_BLOCK
+        assert "right now. \\" not in CARE_RESPONSE_BLOCK

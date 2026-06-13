@@ -22,7 +22,7 @@ logger = logging.getLogger("humane_proxy.escalation")
 # first via `safety.categories.self_harm.region`, without dropping the others.
 
 _CARE_INTRO = (
-    "It sounds like you may be going through something really difficult right now. \\\n"
+    "It sounds like you may be going through something really difficult right now. "
     "You are not alone, and there are people who care about you and want to help.\n\n"
     "Please reach out to a crisis service near you:"
 )
