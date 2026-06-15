@@ -22,6 +22,57 @@ except ImportError:
     _PG_AVAILABLE = False
     psycopg = None  # type: ignore[assignment]
 
+# ── statically generated SQL templates ──────────────────────────────
+# All possible WHERE clause patterns are generated once at import time
+# so CodeQL sees only hardcoded strings, never user-controlled values.
+
+_WHERE_CLAUSES: dict[tuple[bool, bool, bool, bool], str] = {}
+for cat in (False, True):
+    for sid in (False, True):
+        for df in (False, True):
+            for dt in (False, True):
+                parts = []
+                if cat:
+                    parts.append("category = %s")
+                if sid:
+                    parts.append("session_id = %s")
+                if df:
+                    parts.append("timestamp >= %s")
+                if dt:
+                    parts.append("timestamp <= %s")
+                _WHERE_CLAUSES[(cat, sid, df, dt)] = (
+                    "WHERE " + " AND ".join(parts) if parts else ""
+                )
+
+_SORT_SPECS = [
+    ("timestamp",    "asc"),
+    ("timestamp",    "desc"),
+    ("risk_score",   "asc"),
+    ("risk_score",   "desc"),
+    ("category",     "asc"),
+    ("category",     "desc"),
+    ("session_id",   "asc"),
+    ("session_id",   "desc"),
+    ("stage_reached","asc"),
+    ("stage_reached","desc"),
+]
+
+_QUERY_TEMPLATES: dict[tuple[tuple[bool, bool, bool, bool], str, str], str] = {}
+for wk, ws in _WHERE_CLAUSES.items():
+    for sc, sd in _SORT_SPECS:
+        _QUERY_TEMPLATES[(wk, sc, sd)] = (
+            f"SELECT * FROM escalations {ws}"
+            f" ORDER BY {sc} {sd.upper()}"
+            f" LIMIT %s OFFSET %s"
+        )
+
+_COUNT_TEMPLATES: dict[tuple[bool, bool, bool, bool], str] = {}
+for wk, ws in _WHERE_CLAUSES.items():
+    _COUNT_TEMPLATES[wk] = (
+        f"SELECT COUNT(*) as cnt FROM escalations {ws}" if ws
+        else "SELECT COUNT(*) as cnt FROM escalations"
+    )
+
 
 class PostgresStore(EscalationStore):
     """PostgreSQL-backed escalation storage.
@@ -128,8 +179,8 @@ class PostgresStore(EscalationStore):
         sort_order: str = "desc",
     ) -> list[dict[str, Any]]:
         """Return escalation records matching the filters."""
-        clauses, params = self._build_where(category, session_id, date_from, date_to)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params = self._build_params(category, session_id, date_from, date_to)
+        where_key = (category is not None, session_id is not None, date_from is not None, date_to is not None)
         allowed_sort = {
             "timestamp": "timestamp",
             "risk_score": "risk_score",
@@ -137,20 +188,9 @@ class PostgresStore(EscalationStore):
             "session_id": "session_id",
             "stage_reached": "stage_reached",
         }
-        _QUERIES = {
-            ("timestamp",    "asc"):  "SELECT * FROM escalations {where} ORDER BY timestamp ASC LIMIT %s OFFSET %s",
-            ("timestamp",    "desc"): "SELECT * FROM escalations {where} ORDER BY timestamp DESC LIMIT %s OFFSET %s",
-            ("risk_score",   "asc"):  "SELECT * FROM escalations {where} ORDER BY risk_score ASC LIMIT %s OFFSET %s",
-            ("risk_score",   "desc"): "SELECT * FROM escalations {where} ORDER BY risk_score DESC LIMIT %s OFFSET %s",
-            ("category",     "asc"):  "SELECT * FROM escalations {where} ORDER BY category ASC LIMIT %s OFFSET %s",
-            ("category",     "desc"): "SELECT * FROM escalations {where} ORDER BY category DESC LIMIT %s OFFSET %s",
-            ("session_id",   "asc"):  "SELECT * FROM escalations {where} ORDER BY session_id ASC LIMIT %s OFFSET %s",
-            ("session_id",   "desc"): "SELECT * FROM escalations {where} ORDER BY session_id DESC LIMIT %s OFFSET %s",
-            ("stage_reached","asc"):  "SELECT * FROM escalations {where} ORDER BY stage_reached ASC LIMIT %s OFFSET %s",
-            ("stage_reached","desc"): "SELECT * FROM escalations {where} ORDER BY stage_reached DESC LIMIT %s OFFSET %s",
-        }
-        sort_key = (allowed_sort.get(sort_by, "timestamp"), "asc" if sort_order.lower() == "asc" else "desc")
-        sql = _QUERIES[sort_key].format(where=where)
+        sort_col = allowed_sort.get(sort_by, "timestamp")
+        sort_dir = "asc" if sort_order.lower() == "asc" else "desc"
+        sql = _QUERY_TEMPLATES[(where_key, sort_col, sort_dir)]
         with self._conn() as conn:
             rows = conn.execute(sql, params + [limit, offset]).fetchall()
         return [self._parse(r) for r in rows]
@@ -164,11 +204,11 @@ class PostgresStore(EscalationStore):
         date_to: float | None = None,
     ) -> int:
         """Return the number of matching records."""
-        clauses, params = self._build_where(category, session_id, date_from, date_to)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params = self._build_params(category, session_id, date_from, date_to)
+        where_key = (category is not None, session_id is not None, date_from is not None, date_to is not None)
         with self._conn() as conn:
             row = conn.execute(
-                f"SELECT COUNT(*) as cnt FROM escalations {where}", params
+                _COUNT_TEMPLATES[where_key], params
             ).fetchone()
         return row["cnt"] if row else 0
 
@@ -257,28 +297,23 @@ class PostgresStore(EscalationStore):
         return (row["cnt"] if row else 0) < self._rate_limit_max
 
     @staticmethod
-    def _build_where(
+    def _build_params(
         category: str | None,
         session_id: str | None,
         date_from: float | None = None,
         date_to: float | None = None,
-    ) -> tuple[list[str], list[Any]]:
-        """Build WHERE clauses and params from filters."""
-        clauses: list[str] = []
+    ) -> list[Any]:
+        """Build params list from filters."""
         params: list[Any] = []
         if category:
-            clauses.append("category = %s")
             params.append(category)
         if session_id:
-            clauses.append("session_id = %s")
             params.append(session_id)
         if date_from is not None:
-            clauses.append("timestamp >= %s")
             params.append(date_from)
         if date_to is not None:
-            clauses.append("timestamp <= %s")
             params.append(date_to)
-        return clauses, params
+        return params
 
     @staticmethod
     def _parse(row: dict[str, Any]) -> dict[str, Any]:
