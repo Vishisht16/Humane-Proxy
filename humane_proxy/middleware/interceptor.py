@@ -82,9 +82,27 @@ def _resolve_session_id(payload: dict[str, Any], request: Request) -> str:
 def _extract_last_user_message(payload: dict[str, Any]) -> str:
     """Return the content of the last user-role message in the payload."""
     messages: list[dict[str, str]] = payload.get("messages", [])
+    if not isinstance(messages, list):
+        return ""
+        
     for msg in reversed(messages):
-        if msg.get("role") == "user":
-            return msg.get("content", "")
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+            
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            return content
+            
+        if isinstance(content, list):
+            text_parts = [
+                part.get("text", "")
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text", ""), str)
+            ]
+            return " ".join(text_parts)
+            
+        return ""
+        
     return ""
 
 
@@ -192,4 +210,4 @@ async def chat(request: Request) -> JSONResponse:
                 "status": "error",
                 "message": f"Upstream LLM unavailable: {type(exc).__name__}: {exc}",
             },
-        )
+        )

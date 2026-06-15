@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
-from humane_proxy.middleware.interceptor import app, _pipeline
+from humane_proxy.middleware.interceptor import app, _pipeline, _extract_last_user_message
 
 client = TestClient(app)
 
@@ -106,3 +106,96 @@ class TestErrorHandling:
         data = resp.json()
         assert data["status"] == "error"
         assert "valid JSON" in data["message"]
+
+    def test_messages_is_not_a_list(self):
+        resp = client.post("/chat", json={
+            "session_id": "test-malformed-v2",
+            "messages": "not a list",
+        })
+        assert resp.status_code == 400
+        assert resp.json()["status"] == "error"
+
+    def test_message_item_is_not_a_dict(self):
+        resp = client.post("/chat", json={
+            "session_id": "test-malformed-v2",
+            "messages": ["just a string"],
+        })
+        assert resp.status_code == 400
+        assert resp.json()["status"] == "error"
+
+    def test_message_content_is_not_a_string(self):
+        resp = client.post("/chat", json={
+            "session_id": "test-malformed-v2",
+            "messages": [{"role": "user", "content": {"key": "value"}}],
+        })
+        assert resp.status_code == 400
+        assert resp.json()["status"] == "error"
+
+class TestExtractLastUserMessage:
+    def test_multiple_user_messages_uses_last(self):
+        payload = {
+            "messages": [
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "reply"},
+                {"role": "user", "content": [{"type": "text", "text": "second"}]},
+            ]
+        }
+        assert _extract_last_user_message(payload) == "second"
+
+    def test_string_content(self):
+        payload = {
+            "messages": [
+                {"role": "user", "content": "Hello world"}
+            ]
+        }
+        assert _extract_last_user_message(payload) == "Hello world"
+
+    def test_list_content_text_only(self):
+        payload = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Hello"},
+                        {"type": "text", "text": "world"}
+                    ]
+                }
+            ]
+        }
+        assert _extract_last_user_message(payload) == "Hello world"
+
+    def test_list_content_mixed(self):
+        payload = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "What is in"},
+                        {"type": "image_url", "image_url": {"url": "http://example.com/img.png"}},
+                        {"type": "text", "text": "this image?"}
+                    ]
+                }
+            ]
+        }
+        assert _extract_last_user_message(payload) == "What is in this image?"
+
+    def test_no_user_message(self):
+        payload = {
+            "messages": [
+                {"role": "system", "content": "System prompt"},
+                {"role": "assistant", "content": "Hello"}
+            ]
+        }
+        assert _extract_last_user_message(payload) == ""
+
+    def test_invalid_messages_type(self):
+        assert _extract_last_user_message({"messages": "not a list"}) == ""
+
+    def test_invalid_message_type_in_list(self):
+        payload = {
+            "messages": [
+                "not a dict",
+                {"role": "user", "content": "Valid"}
+            ]
+        }
+        assert _extract_last_user_message(payload) == "Valid"
