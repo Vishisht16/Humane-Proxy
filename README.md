@@ -272,6 +272,12 @@ safety:
 
       response_mode: "block"     # default
 
+      # Optional: surface a specific country's crisis resources first.
+      # ISO country code (US, IN, GB, AU, CA, DE, FR, BR, ZA, JP, KR, ES, IT, MX, NZ).
+      # When unset, all countries are listed in the default order. The other
+      # countries are always still included.
+      region: "IN"
+
       # Optional: override the built-in message
       block_message: "We're here for you. Please reach out to..."
 ```
@@ -578,6 +584,7 @@ All values can be set in `humane_proxy.yaml` (project root) or via `HUMANE_PROXY
 | `escalation.rate_limit_max` | `HUMANE_PROXY_RATE_LIMIT_MAX` | `3` | Max alerts per session/window |
 | `storage.backend` | `HUMANE_PROXY_STORAGE_BACKEND` | `"sqlite"` | `"sqlite"`, `"redis"`, `"postgres"` |
 | `safety.categories.self_harm.response_mode` | — | `"block"` | `"block"` or `"forward"` |
+| `safety.categories.self_harm.region` | — | `""` | Optional ISO country code; surfaces that country's crisis resources first in block mode |
 
 ---
 ## OpenTelemetry Tracing
