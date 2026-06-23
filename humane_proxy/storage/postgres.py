@@ -22,6 +22,57 @@ except ImportError:
     _PG_AVAILABLE = False
     psycopg = None  # type: ignore[assignment]
 
+# ── statically generated SQL templates ──────────────────────────────
+# All possible WHERE clause patterns are generated once at import time
+# so CodeQL sees only hardcoded strings, never user-controlled values.
+
+_WHERE_CLAUSES: dict[tuple[bool, bool, bool, bool], str] = {}
+for cat in (False, True):
+    for sid in (False, True):
+        for df in (False, True):
+            for dt in (False, True):
+                parts = []
+                if cat:
+                    parts.append("category = %s")
+                if sid:
+                    parts.append("session_id = %s")
+                if df:
+                    parts.append("timestamp >= %s")
+                if dt:
+                    parts.append("timestamp <= %s")
+                _WHERE_CLAUSES[(cat, sid, df, dt)] = (
+                    "WHERE " + " AND ".join(parts) if parts else ""
+                )
+
+_SORT_SPECS = [
+    ("timestamp",    "asc"),
+    ("timestamp",    "desc"),
+    ("risk_score",   "asc"),
+    ("risk_score",   "desc"),
+    ("category",     "asc"),
+    ("category",     "desc"),
+    ("session_id",   "asc"),
+    ("session_id",   "desc"),
+    ("stage_reached","asc"),
+    ("stage_reached","desc"),
+]
+
+_QUERY_TEMPLATES: dict[tuple[tuple[bool, bool, bool, bool], str, str], str] = {}
+for wk, ws in _WHERE_CLAUSES.items():
+    for sc, sd in _SORT_SPECS:
+        _QUERY_TEMPLATES[(wk, sc, sd)] = (
+            f"SELECT * FROM escalations {ws}"
+            f" ORDER BY {sc} {sd.upper()}"
+            f" LIMIT %s OFFSET %s"
+        )
+
+_COUNT_TEMPLATES: dict[tuple[bool, bool, bool, bool], str] = {}
+for wk, ws in _WHERE_CLAUSES.items():
+    _COUNT_TEMPLATES[wk] = (
+        f"SELECT COUNT(*) as cnt FROM escalations {ws}" if ws
+        else "SELECT COUNT(*) as cnt FROM escalations"
+    )
+
 
 class PostgresStore(EscalationStore):
     """PostgreSQL-backed escalation storage.
@@ -122,14 +173,26 @@ class PostgresStore(EscalationStore):
         session_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        date_from: float | None = None,
+        date_to: float | None = None,
+        sort_by: str = "timestamp",
+        sort_order: str = "desc",
     ) -> list[dict[str, Any]]:
-        clauses, params = self._build_where(category, session_id)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        """Return escalation records matching the filters."""
+        params = self._build_params(category, session_id, date_from, date_to)
+        where_key = (category is not None, session_id is not None, date_from is not None, date_to is not None)
+        allowed_sort = {
+            "timestamp": "timestamp",
+            "risk_score": "risk_score",
+            "category": "category",
+            "session_id": "session_id",
+            "stage_reached": "stage_reached",
+        }
+        sort_col = allowed_sort.get(sort_by, "timestamp")
+        sort_dir = "asc" if sort_order.lower() == "asc" else "desc"
+        sql = _QUERY_TEMPLATES[(where_key, sort_col, sort_dir)]
         with self._conn() as conn:
-            rows = conn.execute(
-                f"SELECT * FROM escalations {where} ORDER BY timestamp DESC LIMIT %s OFFSET %s",
-                params + [limit, offset],
-            ).fetchall()
+            rows = conn.execute(sql, params + [limit, offset]).fetchall()
         return [self._parse(r) for r in rows]
 
     def count(
@@ -137,12 +200,15 @@ class PostgresStore(EscalationStore):
         *,
         category: str | None = None,
         session_id: str | None = None,
+        date_from: float | None = None,
+        date_to: float | None = None,
     ) -> int:
-        clauses, params = self._build_where(category, session_id)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        """Return the number of matching records."""
+        params = self._build_params(category, session_id, date_from, date_to)
+        where_key = (category is not None, session_id is not None, date_from is not None, date_to is not None)
         with self._conn() as conn:
             row = conn.execute(
-                f"SELECT COUNT(*) as cnt FROM escalations {where}", params
+                _COUNT_TEMPLATES[where_key], params
             ).fetchone()
         return row["cnt"] if row else 0
 
@@ -162,8 +228,12 @@ class PostgresStore(EscalationStore):
             return cur.rowcount
 
     def stats(self) -> dict[str, Any]:
+        """Return aggregate statistics including advanced breakdowns."""
+        cutoff_24h = datetime.now(timezone.utc).timestamp() - 86400
         with self._conn() as conn:
-            total = conn.execute("SELECT COUNT(*) as cnt FROM escalations").fetchone()["cnt"]
+            total = conn.execute(
+                "SELECT COUNT(*) as cnt FROM escalations"
+            ).fetchone()["cnt"]
             by_category = {
                 r["category"]: r["cnt"]
                 for r in conn.execute(
@@ -173,10 +243,48 @@ class PostgresStore(EscalationStore):
             avg = conn.execute(
                 "SELECT AVG(risk_score) as avg FROM escalations"
             ).fetchone()["avg"]
+            by_day = {
+                r["day"]: r["cnt"]
+                for r in conn.execute(
+                    """SELECT TO_CHAR(TO_TIMESTAMP(timestamp), 'YYYY-MM-DD') as day,
+                              COUNT(*) as cnt
+                       FROM escalations GROUP BY day ORDER BY day DESC LIMIT 30"""
+                ).fetchall()
+            }
+            top_sessions = [
+                {"session_id": r["session_id"], "count": r["cnt"],
+                 "avg_score": round(r["avg_score"] or 0, 3)}
+                for r in conn.execute(
+                    """SELECT session_id, COUNT(*) as cnt, AVG(risk_score) as avg_score
+                       FROM escalations GROUP BY session_id
+                       ORDER BY cnt DESC LIMIT 10"""
+                ).fetchall()
+            ]
+            by_stage = {
+                r["stage_reached"]: r["cnt"]
+                for r in conn.execute(
+                    "SELECT stage_reached, COUNT(*) as cnt FROM escalations GROUP BY stage_reached"
+                ).fetchall()
+            }
+            hourly = {
+                r["hour"]: r["cnt"]
+                for r in conn.execute(
+                    """SELECT TO_CHAR(TO_TIMESTAMP(timestamp), 'HH24') as hour,
+                              COUNT(*) as cnt
+                       FROM escalations WHERE timestamp >= %s
+                       GROUP BY hour ORDER BY hour""",
+                    (cutoff_24h,),
+                ).fetchall()
+            }
         return {
             "total_escalations": total,
             "by_category": by_category,
             "average_risk_score": round(avg or 0.0, 3),
+            "by_day": by_day,
+            "top_sessions": top_sessions,
+            "by_stage": by_stage,
+            "hourly_last_24h": hourly,
+            "limited_stats": False,
         }
 
     def check_rate_limit(self, session_id: str) -> bool:
@@ -189,18 +297,23 @@ class PostgresStore(EscalationStore):
         return (row["cnt"] if row else 0) < self._rate_limit_max
 
     @staticmethod
-    def _build_where(
-        category: str | None, session_id: str | None,
-    ) -> tuple[list[str], list[Any]]:
-        clauses: list[str] = []
+    def _build_params(
+        category: str | None,
+        session_id: str | None,
+        date_from: float | None = None,
+        date_to: float | None = None,
+    ) -> list[Any]:
+        """Build params list from filters."""
         params: list[Any] = []
         if category:
-            clauses.append("category = %s")
             params.append(category)
         if session_id:
-            clauses.append("session_id = %s")
             params.append(session_id)
-        return clauses, params
+        if date_from is not None:
+            params.append(date_from)
+        if date_to is not None:
+            params.append(date_to)
+        return params
 
     @staticmethod
     def _parse(row: dict[str, Any]) -> dict[str, Any]:

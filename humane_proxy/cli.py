@@ -255,27 +255,10 @@ def version() -> None:
 @click.option("--session", "-s", default=None, help="Filter by session ID")
 def escalations(category: str | None, limit: int, session: str | None) -> None:
     """List recent escalation events from the audit log."""
-    import json
-    import sqlite3
-    from humane_proxy.escalation.local_db import _get_db_path
+    from humane_proxy.storage.factory import get_store
 
-    conn = sqlite3.connect(_get_db_path(), check_same_thread=False)
-    try:
-        clauses, params = [], []
-        if category:
-            clauses.append("category = ?")
-            params.append(category)
-        if session:
-            clauses.append("session_id = ?")
-            params.append(session)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        rows = conn.execute(
-            f"SELECT id, session_id, category, risk_score, timestamp FROM escalations "
-            f"{where} ORDER BY timestamp DESC LIMIT ?",
-            params + [limit],
-        ).fetchall()
-    finally:
-        conn.close()
+    store = get_store()
+    rows = store.query(category=category, session_id=session, limit=limit, offset=0)
 
     if not rows:
         click.echo("  ℹ  No escalations found.")
@@ -283,12 +266,12 @@ def escalations(category: str | None, limit: int, session: str | None) -> None:
 
     click.echo(f"\n  {'ID':<6} {'Session':<28} {'Category':<18} {'Score':<7} {'When'}")
     click.echo("  " + "-" * 75)
-    for row in rows:
-        id_, sid, cat, score, ts = row
+    for rec in rows:
         from datetime import datetime, timezone
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        dt = datetime.fromtimestamp(rec["timestamp"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        cat = rec["category"]
         emoji = "🆘" if cat == "self_harm" else "⚠️"
-        click.echo(f"  {id_:<6} {sid:<28} {emoji} {cat:<16} {score:.2f}  {dt}")
+        click.echo(f"  {rec['id']:<6} {rec['session_id']:<28} {emoji} {cat:<16} {rec['risk_score']:.2f}  {dt}")
     click.echo("")
 
 
@@ -296,20 +279,11 @@ def escalations(category: str | None, limit: int, session: str | None) -> None:
 @click.argument("session_id")
 def session(session_id: str) -> None:
     """Show risk trajectory and escalation history for a session."""
-    import json
-    import sqlite3
-    from humane_proxy.escalation.local_db import _get_db_path
+    from humane_proxy.storage.factory import get_store
     from humane_proxy.risk.trajectory import analyze
 
-    conn = sqlite3.connect(_get_db_path(), check_same_thread=False)
-    try:
-        rows = conn.execute(
-            "SELECT category, risk_score, timestamp, triggers FROM escalations "
-            "WHERE session_id = ? ORDER BY timestamp ASC",
-            (session_id,),
-        ).fetchall()
-    finally:
-        conn.close()
+    store = get_store()
+    rows = store.query(session_id=session_id, limit=500, offset=0)
 
     click.echo(f"\n  📊 Session: {session_id}")
     click.echo(f"  Escalation count: {len(rows)}\n")
@@ -318,15 +292,19 @@ def session(session_id: str) -> None:
         click.echo("  ℹ  No escalations recorded for this session.")
         return
 
-    for cat, score, ts, triggers_json in rows:
+    for rec in rows:
         from datetime import datetime, timezone
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        dt = datetime.fromtimestamp(rec["timestamp"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        cat = rec["category"]
         emoji = "🆘" if cat == "self_harm" else "⚠️"
-        try:
-            trigs = json.loads(triggers_json)
-        except Exception:
-            trigs = []
-        click.echo(f"  {emoji} {dt}  score={score:.2f}  category={cat}")
+        trigs = rec.get("triggers", [])
+        if isinstance(trigs, str):
+            import json
+            try:
+                trigs = json.loads(trigs)
+            except Exception:
+                trigs = []
+        click.echo(f"  {emoji} {dt}  score={rec['risk_score']:.2f}  category={cat}")
         if trigs:
             click.echo(f"     triggers: {', '.join(trigs[:3])}")
 
