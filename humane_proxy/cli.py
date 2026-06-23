@@ -20,8 +20,10 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
+import yaml
 
 _BANNER = r"""
   _   _                                  ____
@@ -96,7 +98,7 @@ heuristics:
     - "the villain"
     - "the character"
     - "in a novel"
-    - "in a movie"
+   - "in a movie"
     - "in a book"
     - "in a story"
     - "my character"
@@ -136,6 +138,151 @@ LLM_API_URL=
 # HUMANE_PROXY_PAGERDUTY_KEY=your-routing-key
 # HUMANE_PROXY_DB_PATH=/path/to/escalations.db
 """
+
+_VALID_STAGE3_PROVIDERS = {"auto", "openai_moderation", "llamaguard", "openai_chat", "none"}
+_REDACTED_KEYS = {"api_key", "slack_url", "discord_url", "pagerduty_routing_key", "teams_url", "password", "dsn", "url"}
+
+
+def _configured_yaml_path() -> Path:
+    """Return the config path used by the layered config loader."""
+    configured = os.environ.get("HUMANE_PROXY_CONFIG")
+    return Path(configured) if configured else Path.cwd() / "humane_proxy.yaml"
+
+
+def _parse_user_config_for_dry_run(path: Path) -> list[str]:
+    """Parse the user config when present so syntax errors fail dry-run."""
+    if not path.exists():
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+    except yaml.YAMLError as exc:
+        return [f"{path}: invalid YAML ({exc})"]
+    except OSError as exc:
+        return [f"{path}: could not be read ({exc})"]
+
+    if data is not None and not isinstance(data, dict):
+        return [f"{path}: top-level YAML value must be a mapping"]
+    return []
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _validate_start_config(cfg: dict) -> list[str]:
+    """Validate the local startup config without opening sockets or APIs."""
+    errors: list[str] = []
+
+    server = cfg.get("server")
+    if not isinstance(server, dict):
+        errors.append("server: must be a mapping")
+    else:
+        host = server.get("host")
+        port = server.get("port")
+        reload_enabled = server.get("reload")
+        if not isinstance(host, str) or not host.strip():
+            errors.append("server.host: must be a non-empty string")
+        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+            errors.append("server.port: must be an integer between 1 and 65535")
+        if reload_enabled is not None and not isinstance(reload_enabled, bool):
+            errors.append("server.reload: must be true or false")
+
+    safety = cfg.get("safety")
+    if not isinstance(safety, dict):
+        errors.append("safety: must be a mapping")
+    else:
+        for key in ("risk_threshold", "spike_boost"):
+            value = safety.get(key)
+            if not _is_number(value) or not 0 <= value <= 1:
+                errors.append(f"safety.{key}: must be a number between 0 and 1")
+
+    pipeline = cfg.get("pipeline")
+    enabled_stages: list[int] = []
+    if not isinstance(pipeline, dict):
+        errors.append("pipeline: must be a mapping")
+    else:
+        raw_stages = pipeline.get("enabled_stages")
+        if not isinstance(raw_stages, list) or not raw_stages:
+            errors.append("pipeline.enabled_stages: must be a non-empty list")
+        elif not all(isinstance(stage, int) and not isinstance(stage, bool) for stage in raw_stages):
+            errors.append("pipeline.enabled_stages: must contain only integers")
+        else:
+            enabled_stages = raw_stages
+            invalid = [stage for stage in enabled_stages if stage not in (1, 2, 3)]
+            if invalid:
+                errors.append("pipeline.enabled_stages: only stages 1, 2, and 3 are supported")
+            if 1 not in enabled_stages:
+                errors.append("pipeline.enabled_stages: must include stage 1")
+
+        for key in ("stage1_ceiling", "stage2_ceiling"):
+            value = pipeline.get(key)
+            if not _is_number(value):
+                errors.append(f"pipeline.{key}: must be a number")
+
+    stage3 = cfg.get("stage3")
+    if not isinstance(stage3, dict):
+        errors.append("stage3: must be a mapping")
+    else:
+        provider = stage3.get("provider", "auto")
+        if provider not in _VALID_STAGE3_PROVIDERS:
+            errors.append(
+                "stage3.provider: must be one of auto, openai_moderation, llamaguard, openai_chat, none"
+            )
+        if 3 in enabled_stages:
+            if provider == "none":
+                errors.append("stage3.provider: cannot be 'none' when pipeline.enabled_stages includes 3")
+            elif provider == "auto" and not (os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY")):
+                errors.append("stage3: OPENAI_API_KEY or GROQ_API_KEY must be set when stage 3 is enabled")
+            elif provider in ("openai_moderation", "openai_chat") and not os.environ.get("OPENAI_API_KEY"):
+                errors.append(f"stage3: OPENAI_API_KEY must be set for provider '{provider}'")
+            elif provider == "llamaguard" and not (os.environ.get("GROQ_API_KEY") or os.environ.get("LLM_API_KEY")):
+                errors.append("stage3: GROQ_API_KEY or LLM_API_KEY must be set for provider 'llamaguard'")
+
+    escalation = cfg.get("escalation")
+    if not isinstance(escalation, dict):
+        errors.append("escalation: must be a mapping")
+    else:
+        webhooks = escalation.get("webhooks", {})
+        if not isinstance(webhooks, dict):
+            errors.append("escalation.webhooks: must be a mapping")
+
+    return errors
+
+
+def _redact_config(value: Any, key: str = "") -> Any:
+    """Return a copy of config safe to print in dry-run output."""
+    if isinstance(value, dict):
+        return {k: _redact_config(v, k) for k, v in value.items()}
+    if key in _REDACTED_KEYS and value:
+        return "***redacted***"
+    return value
+
+
+def _run_start_dry_run(cfg: dict) -> int:
+    config_path = _configured_yaml_path()
+    errors = _parse_user_config_for_dry_run(config_path)
+    errors.extend(_validate_start_config(cfg))
+
+    click.echo("  Dry run: validating HumaneProxy startup config")
+    click.echo(f"  Config file: {config_path if config_path.exists() else '(package defaults only)'}")
+    click.echo("")
+
+    if errors:
+        click.echo("  Validation failed:")
+        for error in errors:
+            click.echo(f"    - {error}")
+        return 1
+
+    click.echo("  Validation passed")
+    enabled_stages = cfg.get("pipeline", {}).get("enabled_stages", [])
+    click.echo("  Stage 3: API key requirements satisfied" if 3 in enabled_stages else "  Stage 3: not enabled")
+    click.echo("")
+    click.echo("  Resolved config:")
+    rendered = yaml.safe_dump(_redact_config(cfg), sort_keys=True, default_flow_style=False).rstrip()
+    for line in rendered.splitlines():
+        click.echo(f"    {line}")
+    return 0
 
 
 @click.group()
@@ -178,7 +325,8 @@ def init() -> None:
 @click.option("--host", default=None, help="Bind host (default: from config)")
 @click.option("--port", "-p", default=None, type=int, help="Bind port (default: from config)")
 @click.option("--reload/--no-reload", default=None, help="Auto-reload on changes")
-def start(host: str | None, port: int | None, reload: bool | None) -> None:
+@click.option("--dry-run", is_flag=True, help="Validate config and exit without starting the proxy")
+def start(host: str | None, port: int | None, reload: bool | None, dry_run: bool) -> None:
     """Start the HumaneProxy proxy server."""
     click.echo(_BANNER)
 
@@ -190,6 +338,12 @@ def start(host: str | None, port: int | None, reload: bool | None) -> None:
     final_host = host or server_cfg.get("host", "0.0.0.0")
     final_port = port or server_cfg.get("port", 8000)
     final_reload = reload if reload is not None else server_cfg.get("reload", False)
+    cfg.setdefault("server", {})["host"] = final_host
+    cfg.setdefault("server", {})["port"] = final_port
+    cfg.setdefault("server", {})["reload"] = final_reload
+
+    if dry_run:
+        sys.exit(_run_start_dry_run(cfg))
 
     click.echo(f"  🛡️  Starting HumaneProxy on {final_host}:{final_port}")
     if final_reload:
@@ -321,7 +475,6 @@ def session(session_id: str) -> None:
               help="Comma-separated pipeline stages to run. Default: '1,2'")
 def benchmark(dataset: str, ci: bool, stages: str) -> None:
     """Run an evaluation dataset through the safety pipeline and report results.
-
     The dataset must be a JSON file containing an array of objects, each with
     'message' (str) and 'expected' (str: safe | self_harm | criminal_intent).
 

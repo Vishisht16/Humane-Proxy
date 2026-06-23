@@ -27,6 +27,54 @@ class TestInit:
         assert result.exit_code == 0
 
 
+class TestStartDryRun:
+    def test_successful_dry_run_does_not_start_server(self, monkeypatch):
+        from humane_proxy.config import reload_config
+
+        monkeypatch.delenv("HUMANE_PROXY_CONFIG", raising=False)
+        reload_config()
+
+        result = runner.invoke(main, ["start", "--dry-run"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert "Validation passed" in result.output
+        assert "Resolved config" in result.output
+        assert "Starting HumaneProxy" not in result.output
+
+    def test_dry_run_rejects_invalid_config(self, tmp_path, monkeypatch):
+        from humane_proxy.config import reload_config
+
+        config_path = tmp_path / "humane_proxy.yaml"
+        config_path.write_text("server:\n  port: 70000\n", encoding="utf-8")
+        monkeypatch.setenv("HUMANE_PROXY_CONFIG", str(config_path))
+        reload_config()
+
+        result = runner.invoke(main, ["start", "--dry-run"], catch_exceptions=False)
+
+        assert result.exit_code == 1
+        assert "Validation failed" in result.output
+        assert "server.port" in result.output
+
+    def test_dry_run_reports_missing_stage3_api_key(self, tmp_path, monkeypatch):
+        from humane_proxy.config import reload_config
+
+        config_path = tmp_path / "humane_proxy.yaml"
+        config_path.write_text(
+            "pipeline:\n  enabled_stages: [1, 3]\nstage3:\n  provider: auto\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("HUMANE_PROXY_CONFIG", str(config_path))
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
+        reload_config()
+
+        result = runner.invoke(main, ["start", "--dry-run"], catch_exceptions=False)
+
+        assert result.exit_code == 1
+        assert "OPENAI_API_KEY or GROQ_API_KEY" in result.output
+
+
 class TestCheck:
     def test_safe_message(self):
         result = runner.invoke(main, ["check", "Hello world"])
