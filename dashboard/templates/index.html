@@ -125,7 +125,7 @@
         <header
             class="flex h-14 items-center justify-between border-b border-zinc-200 px-4 dark:border-white/10 sm:px-6">
             <div class="flex items-center gap-3">
-                <button id="sidebar-toggle"
+                <button aria-controls="sidebar" aria-expanded="true" id="sidebar-toggle"
                     class="lg:hidden p-1.5 -ml-2 rounded-md text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/[0.08]"
                     aria-label="Toggle sidebar">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -385,7 +385,7 @@
                             <p class="mt-1 text-sm text-zinc-500">Latest hardcoded sample events</p>
                         </div>
                         <a href="#" class="text-sm font-semibold text-zinc-500 transition hover:text-blue-500">View all
-                            -></a>
+                            -&gt;</a>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full min-w-[920px] text-left text-sm">
@@ -616,9 +616,11 @@
                 const openH = (opened[i] / max) * (height - pad * 2) * progress;
                 const resH = (resolved[i] / max) * (height - pad * 2) * progress;
                 ctx.fillStyle = '#f43f5e';
+                ctx.beginPath();
                 ctx.roundRect(x, height - pad - openH, gap * .26, openH, 7);
                 ctx.fill();
                 ctx.fillStyle = '#22c55e';
+                ctx.beginPath();
                 ctx.roundRect(x + gap * .31, height - pad - resH, gap * .26, resH, 7);
                 ctx.fill();
                 ctx.fillStyle = c.text;
@@ -687,6 +689,8 @@
         const sidebar = document.getElementById('sidebar');
         if (sidebarToggle && sidebar) {
             sidebarToggle.addEventListener('click', () => {
+                const isExpanded = sidebarToggle.getAttribute('aria-expanded') === 'true';
+                sidebarToggle.setAttribute('aria-expanded', String(!isExpanded));
                 sidebar.classList.toggle('hidden');
 
                 setTimeout(() => drawAll(1), 50);
