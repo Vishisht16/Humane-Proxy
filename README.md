@@ -676,8 +676,9 @@ By default HumaneProxy **never stores raw message text**. Only a SHA-256 hash is
 - `message_hash` — SHA-256 of the original text
 - `stage_reached` — which pipeline stage produced the result
 - `reasoning` — Stage-3 LLM reasoning (if available)
+
 To enable raw text storage (e.g. for human review):
- 
+
 ```yaml
 privacy:
   store_message_text: true
