@@ -27,8 +27,11 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+import sys
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from humane_proxy._json import dumps as _json_dumps
@@ -41,6 +44,31 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 _security = HTTPBearer(auto_error=False)
 
 _start_time = time.monotonic()
+
+# Try to locate the dashboard index.html across multiple layout conventions
+_HTML_PATH = None
+_CANDIDATE_PATHS = [
+    # 1. Dev/Git clone layout: dashboard/ is at the repo root (parent of package dir)
+    Path(__file__).resolve().parent.parent.parent / "dashboard" / "templates" / "index.html",
+    # 2. Packaged layout: dashboard/ is nested inside the package (old convention)
+    Path(__file__).resolve().parent.parent / "dashboard" / "templates" / "index.html",
+    # 3. System prefix layout (for standard non-editable installations using data-files)
+    Path(sys.prefix) / "dashboard" / "templates" / "index.html",
+]
+
+for _path in _CANDIDATE_PATHS:
+    if _path.exists():
+        _HTML_PATH = _path
+        break
+
+
+@router.get("", response_class=HTMLResponse, include_in_schema=False)
+@router.get("/", response_class=HTMLResponse, include_in_schema=False)
+def serve_dashboard():
+    """Serve the admin dashboard HTML page."""
+    if not _HTML_PATH or not _HTML_PATH.exists():
+        raise HTTPException(status_code=404, detail="Dashboard template not found.")
+    return HTMLResponse(content=_HTML_PATH.read_text(encoding="utf-8"))
 
 
 # ---------------------------------------------------------------------------

@@ -189,3 +189,15 @@ class TestEmptyFilterParams:
         resp = client.get("/admin/escalations?category=&session_id=", headers=self.HEADERS)
         assert resp.status_code == 200
         assert resp.json()["total"] == 3
+
+
+class TestDashboard:
+    def test_serve_dashboard(self):
+        resp = client.get("/admin")
+        assert resp.status_code == 200
+        assert "<html" in resp.text
+        assert "HumaneProxy Admin Dashboard" in resp.text
+
+        resp_slash = client.get("/admin/")
+        assert resp_slash.status_code == 200
+        assert "<html" in resp_slash.text
