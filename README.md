@@ -76,6 +76,16 @@ result = proxy.check("I want to end my life", session_id="user-42")
 
 This exposes 3 tools to your AI agent: `check_message_safety`, `get_session_risk`, and `list_recent_escalations`.
 
+## Direct Integration (FastAPI & Flask)
+
+To add HumaneProxy to an existing backend instead of running a separate proxy server, see the runnable examples in [`examples/`](./examples/):
+
+- [FastAPI middleware](./examples/fastapi_middleware.py) uses `proxy.check_async()` to screen requests asynchronously.
+- [Flask integration](./examples/flask_integration.py) uses `proxy.check()` in a `before_request` hook.
+- [OpenAI wrapper](./examples/openai_proxy_wrapper.py) screens prompts before sending them to the OpenAI client.
+
+Install the example dependencies with `pip install -r examples/requirements.txt`.
+
 ---
 
 ## How it works
