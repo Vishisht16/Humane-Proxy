@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:12.15-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     GLAMA_VERSION="1.0.0" \
